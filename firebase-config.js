@@ -18,7 +18,7 @@ export const firebaseConfig = {
 // ─────────────────────────────────────────────────────────────
 
 export const INSTRUCTOR_CREDS = {
-  user: "instructor",
-  pass: "admin123",
+  user: "א",
+  pass: "א",
   
 };
