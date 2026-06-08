@@ -360,11 +360,19 @@ async function renderStudents() {
     const snap  = await getDocs(collection(db,"students"));
     const total = weeksCache.reduce((a,w) => a+w.surveys.length, 0);
     if (snap.empty) { c.innerHTML='<div class="empty">No students yet.</div>'; return; }
+    // Build a set of all currently existing survey IDs
+    const existingSurveyIds = new Set(
+      weeksCache.flatMap(w => w.surveys.map(s => s.id))
+    );
     const rows = await Promise.all(snap.docs.map(async d => {
       const name     = d.id;
       const initials = name.split(" ").map(x=>x[0]).join("").toUpperCase().slice(0,2);
       let done = 0;
-      try { done = (await getDocs(collection(db,"completions",name,"done"))).size; } catch{}
+      try {
+        const compSnap = await getDocs(collection(db,"completions",name,"done"));
+        // Only count completions for surveys that still exist
+        done = compSnap.docs.filter(d => existingSurveyIds.has(d.id)).length;
+      } catch{}
       const pct = total ? Math.round(done/total*100) : 0;
       return `<div class="student-row">
         <div class="avatar">${esc(initials)}</div>
@@ -395,7 +403,9 @@ async function renderStudentView() {
   } catch {}
 
   const total = weeksCache.reduce((a,w) => a+w.surveys.length, 0);
-  const done  = Object.keys(comp).length;
+  // Only count completions for surveys that still exist
+  const existingIds = new Set(weeksCache.flatMap(w => w.surveys.map(s => s.id)));
+  const done  = Object.keys(comp).filter(id => existingIds.has(id)).length;
   const pct   = total ? Math.round(done/total*100) : 0;
 
   progWrap.innerHTML = `
