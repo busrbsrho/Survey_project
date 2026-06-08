@@ -92,23 +92,29 @@ function signOut() {
 window.signOut = signOut;
 
 // ── Live listener: weeks + their surveys ─────────────────────
-// Fires immediately on first load and again whenever data changes.
+// Returns a Promise that resolves after the FIRST snapshot is processed.
+// After that it keeps listening and re-renders on every change.
 function subscribeWeeks() {
-  const q = query(weeksCol, orderBy("order", "asc"));
-  onSnapshot(q, async (snapshot) => {
-    const weeks = [];
-    for (const weekDoc of snapshot.docs) {
-      const data = weekDoc.data();
-      const surveysSnap = await getDocs(
-        query(collection(db, "weeks", weekDoc.id, "surveys"), orderBy("createdAt", "asc"))
-      );
-      const surveys = surveysSnap.docs.map(s => ({ id: s.id, ...s.data() }));
-      weeks.push({ id: weekDoc.id, name: data.name, order: data.order, surveys });
-    }
-    weeksCache = weeks;
-    // Re-render whichever dashboard is currently showing
-    if (currentRole === "instructor") renderInstructorWeeks();
-    if (currentRole === "student")    renderStudentView();
+  return new Promise((resolve) => {
+    let firstSnapshot = true;
+    const q = query(weeksCol, orderBy("order", "asc"));
+    onSnapshot(q, async (snapshot) => {
+      const weeks = [];
+      for (const weekDoc of snapshot.docs) {
+        const data = weekDoc.data();
+        const surveysSnap = await getDocs(
+          query(collection(db, "weeks", weekDoc.id, "surveys"), orderBy("createdAt", "asc"))
+        );
+        const surveys = surveysSnap.docs.map(s => ({ id: s.id, ...s.data() }));
+        weeks.push({ id: weekDoc.id, name: data.name, order: data.order, surveys });
+      }
+      weeksCache = weeks;
+      // Re-render whichever dashboard is currently showing
+      if (currentRole === "instructor") renderInstructorWeeks();
+      if (currentRole === "student")    renderStudentView();
+      // Resolve the promise on first load so boot() can continue
+      if (firstSnapshot) { firstSnapshot = false; resolve(); }
+    });
   });
 }
 
@@ -524,12 +530,14 @@ document.addEventListener("keydown", e => {
 async function boot() {
   showLoading(true);
 
-  // Start the live weeks listener — renders as soon as data arrives
-  subscribeWeeks();
+  // Wait for the first snapshot to arrive before rendering anything.
+  // This ensures weeksCache is populated when we restore a session.
+  await subscribeWeeks();
 
-  // If there's a saved session, restore the correct screen right away
+  // If there's a saved session, restore the correct screen
   if (currentRole === "instructor") {
     updateTopbar("Instructor", "Instructor");
+    renderInstructorWeeks();
     showScreen("screen-instructor");
   } else if (currentRole === "student" && currentUser) {
     updateTopbar("Student", currentUser);
