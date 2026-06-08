@@ -14,22 +14,29 @@ import { firebaseConfig, INSTRUCTOR_CREDS }       from "./firebase-config.js";
 const firebaseApp = initializeApp(firebaseConfig);
 const db          = getFirestore(firebaseApp);
 
-// ── Firestore collection references ─────────────────────────
-// weeks/{weekId}                  → { name, order, createdAt }
-// weeks/{weekId}/surveys/{survId} → { name, url, createdAt }
-// students/{name}                 → { pass, createdAt }
-// completions/{name}/done/{survId}→ { done: true }
-
-const weeksCol      = collection(db, "weeks");
-const studentsCol   = collection(db, "students");
+const weeksCol    = collection(db, "weeks");
+const studentsCol = collection(db, "students");
 
 // ── Local cache (kept in sync via onSnapshot) ────────────────
-let weeksCache   = [];   // [{ id, name, order, surveys: [{id,name,url}] }]
-let studentsCache = {};  // { name: { pass } }
+let weeksCache = [];
 
-// ── Session ──────────────────────────────────────────────────
-let currentUser = null;
-let currentRole = null;
+// ── Session — saved in sessionStorage so refresh keeps you logged in ──
+let currentUser = sessionStorage.getItem("st_user") || null;
+let currentRole = sessionStorage.getItem("st_role") || null;
+
+function saveSession(user, role) {
+  currentUser = user;
+  currentRole = role;
+  sessionStorage.setItem("st_user", user);
+  sessionStorage.setItem("st_role", role);
+}
+
+function clearSession() {
+  currentUser = null;
+  currentRole = null;
+  sessionStorage.removeItem("st_user");
+  sessionStorage.removeItem("st_role");
+}
 
 // ── UI state ─────────────────────────────────────────────────
 let expandedWeeks = {};
@@ -67,7 +74,7 @@ function updateTopbar(role, name) {
 }
 
 function signOut() {
-  currentUser = null; currentRole = null;
+  clearSession();
   $("role-badge").hidden = true;
   $("signout-btn").hidden = true;
   $("topbar-sub").textContent = "Sign in to continue";
@@ -85,13 +92,13 @@ function signOut() {
 window.signOut = signOut;
 
 // ── Live listener: weeks + their surveys ─────────────────────
+// Fires immediately on first load and again whenever data changes.
 function subscribeWeeks() {
   const q = query(weeksCol, orderBy("order", "asc"));
   onSnapshot(q, async (snapshot) => {
     const weeks = [];
     for (const weekDoc of snapshot.docs) {
       const data = weekDoc.data();
-      // Load surveys sub-collection
       const surveysSnap = await getDocs(
         query(collection(db, "weeks", weekDoc.id, "surveys"), orderBy("createdAt", "asc"))
       );
@@ -99,6 +106,7 @@ function subscribeWeeks() {
       weeks.push({ id: weekDoc.id, name: data.name, order: data.order, surveys });
     }
     weeksCache = weeks;
+    // Re-render whichever dashboard is currently showing
     if (currentRole === "instructor") renderInstructorWeeks();
     if (currentRole === "student")    renderStudentView();
   });
@@ -110,7 +118,7 @@ async function instructorLogin() {
   const u = $("ins-user").value.trim();
   const p = $("ins-pass").value;
   if (u === INSTRUCTOR_CREDS.user && p === INSTRUCTOR_CREDS.pass) {
-    currentRole = "instructor"; currentUser = "instructor";
+    saveSession("instructor", "instructor");
     updateTopbar("Instructor", "Instructor");
     renderInstructorWeeks();
     showScreen("screen-instructor");
@@ -130,14 +138,14 @@ async function studentSignup() {
 
   showLoading(true);
   try {
-    const docRef = doc(studentsCol, name);
+    const docRef  = doc(studentsCol, name);
     const existing = await getDoc(docRef);
     if (existing.exists()) {
       showLoading(false);
       return setError("signup-err", "That name is already registered. Try signing in.");
     }
     await setDoc(docRef, { pass, createdAt: Date.now() });
-    currentUser = name; currentRole = "student";
+    saveSession(name, "student");
     updateTopbar("Student", name);
     await renderStudentView();
     showScreen("screen-student");
@@ -161,7 +169,7 @@ async function studentLogin() {
       showLoading(false);
       return setError("slogin-err", "Name or password is incorrect.");
     }
-    currentUser = name; currentRole = "student";
+    saveSession(name, "student");
     updateTopbar("Student", name);
     await renderStudentView();
     showScreen("screen-student");
@@ -204,20 +212,16 @@ async function addWeek() {
 
   showLoading(true);
   try {
-    // Create week document
     const weekRef = await addDoc(weeksCol, {
-      name: wn,
-      order: Date.now(),
-      createdAt: Date.now(),
+      name: wn, order: Date.now(), createdAt: Date.now(),
     });
-    // Add first survey to sub-collection
     await addDoc(collection(db, "weeks", weekRef.id, "surveys"), {
       name: sn, url: su, createdAt: Date.now(),
     });
-    $("new-week-name").value = "";
+    $("new-week-name").value  = "";
     $("new-survey-name").value = "";
-    $("new-survey-url").value = "";
-    $("add-week-form").hidden = true;
+    $("new-survey-url").value  = "";
+    $("add-week-form").hidden  = true;
   } catch (e) {
     setError("new-week-err", "Error saving: " + e.message);
   }
@@ -239,7 +243,7 @@ async function addSurveyToWeek(weekId) {
   const errId = "qs-err-" + weekId;
   clearError(errId);
   const sn = $("qs-name-" + weekId)?.value.trim();
-  const su = $("qs-url-" + weekId)?.value.trim();
+  const su = $("qs-url-"  + weekId)?.value.trim();
   if (!sn || !su) return setError(errId, "Please fill in both fields.");
 
   showLoading(true);
@@ -260,7 +264,6 @@ async function deleteWeek(weekId, weekName) {
   if (!confirm(`Delete "${weekName}" and all its surveys?`)) return;
   showLoading(true);
   try {
-    // Delete all surveys first
     const surveysSnap = await getDocs(collection(db, "weeks", weekId, "surveys"));
     for (const s of surveysSnap.docs) await deleteDoc(s.ref);
     await deleteDoc(doc(db, "weeks", weekId));
@@ -280,7 +283,7 @@ async function deleteSurvey(weekId, surveyId) {
 }
 window.deleteSurvey = deleteSurvey;
 
-// ── Instructor: edit ──────────────────────────────────────────
+// ── Instructor: inline edit ───────────────────────────────────
 function startEditSurvey(weekId, surveyId) {
   editingEntry = { weekId, surveyId };
   renderInstructorWeeks();
@@ -293,7 +296,7 @@ window.cancelEdit = cancelEdit;
 
 async function saveEditSurvey(weekId, surveyId) {
   const newName = $("edit-name-" + surveyId)?.value.trim();
-  const newUrl  = $("edit-url-" + surveyId)?.value.trim();
+  const newUrl  = $("edit-url-"  + surveyId)?.value.trim();
   if (!newName || !newUrl) return;
   showLoading(true);
   try {
@@ -377,7 +380,7 @@ function renderInstructorWeeks() {
             <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); toggleQuickAdd('${esc(week.id)}')">
               <i class="ti ti-plus" aria-hidden="true"></i> Add survey
             </button>
-            <button class="btn btn-danger btn-sm" onclick="deleteWeek('${esc(week.id)}', '${esc(week.name)}')">
+            <button class="btn btn-danger btn-sm" onclick="deleteWeek('${esc(week.id)}','${esc(week.name)}')">
               <i class="ti ti-trash" aria-hidden="true"></i> Delete week
             </button>
           </div>
@@ -398,16 +401,15 @@ async function renderStudents() {
   const container = $("students-list");
   container.innerHTML = '<div class="empty">Loading students…</div>';
   try {
-    const snap = await getDocs(studentsCol);
+    const snap  = await getDocs(studentsCol);
     const total = weeksCache.reduce((a, w) => a + w.surveys.length, 0);
     if (snap.empty) {
       container.innerHTML = '<div class="empty">No students have registered yet.</div>';
       return;
     }
     const rows = await Promise.all(snap.docs.map(async d => {
-      const name = d.id;
+      const name     = d.id;
       const initials = name.split(" ").map(x => x[0]).join("").toUpperCase().slice(0, 2);
-      // Count completions
       let done = 0;
       try {
         const compSnap = await getDocs(collection(db, "completions", name, "done"));
@@ -432,7 +434,7 @@ async function renderStudents() {
       </p>
       <div class="card" style="padding:4px 14px">${rows.join("")}</div>`;
   } catch (e) {
-    container.innerHTML = `<div class="empty">Error loading students: ${esc(e.message)}</div>`;
+    container.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
   }
 }
 
@@ -441,7 +443,6 @@ async function renderStudentView() {
   const progWrap = $("student-progress-wrap");
   const weeksEl  = $("student-weeks");
 
-  // Load completions from Firestore
   let comp = {};
   try {
     const compSnap = await getDocs(collection(db, "completions", currentUser, "done"));
@@ -503,11 +504,8 @@ async function renderStudentView() {
 async function toggleComplete(surveyId, checked) {
   try {
     const ref = doc(db, "completions", currentUser, "done", surveyId);
-    if (checked) {
-      await setDoc(ref, { done: true, at: Date.now() });
-    } else {
-      await deleteDoc(ref);
-    }
+    if (checked) await setDoc(ref, { done: true, at: Date.now() });
+    else         await deleteDoc(ref);
     await renderStudentView();
   } catch (e) { alert("Error saving: " + e.message); }
 }
@@ -522,7 +520,24 @@ document.addEventListener("keydown", e => {
   else if (active === "screen-student-signup") studentSignup();
 });
 
-// ── Boot ──────────────────────────────────────────────────────
-showLoading(true);
-subscribeWeeks();
-showLoading(false);
+// ── Boot: restore session if user was already logged in ───────
+async function boot() {
+  showLoading(true);
+
+  // Start the live weeks listener — renders as soon as data arrives
+  subscribeWeeks();
+
+  // If there's a saved session, restore the correct screen right away
+  if (currentRole === "instructor") {
+    updateTopbar("Instructor", "Instructor");
+    showScreen("screen-instructor");
+  } else if (currentRole === "student" && currentUser) {
+    updateTopbar("Student", currentUser);
+    await renderStudentView();
+    showScreen("screen-student");
+  }
+
+  showLoading(false);
+}
+
+boot();
