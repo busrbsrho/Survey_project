@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SurveyTrack</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <div class="app" id="app">
+
+    <!-- TOP BAR -->
+    <header class="topbar">
+      <div class="topbar-logo" aria-hidden="true">
+        <i class="ti ti-clipboard-list"></i>
+      </div>
+      <div class="topbar-info">
+        <span class="topbar-title">SurveyTrack</span>
+        <span class="topbar-sub" id="topbar-sub">Sign in to continue</span>
+      </div>
+      <div class="topbar-right">
+        <span class="role-badge" id="role-badge" hidden></span>
+        <button class="btn btn-ghost btn-sm" id="signout-btn" hidden onclick="signOut()">
+          <i class="ti ti-logout" aria-hidden="true"></i> Sign out
+        </button>
+      </div>
+    </header>
+
+    <!-- LOADING OVERLAY -->
+    <div id="loading-overlay" class="loading-overlay">
+      <div class="spinner"></div>
+    </div>
+
+    <!-- SCREENS CONTAINER -->
+    <main class="screens">
+
+      <!-- ── ROLE PICKER ── -->
+      <section class="screen active" id="screen-pick" aria-label="Role selection">
+        <div class="login-wrap">
+          <div class="login-card">
+            <div class="login-card-icon green"><i class="ti ti-clipboard-list" aria-hidden="true"></i></div>
+            <h1 class="login-title">Welcome to SurveyTrack</h1>
+            <p class="login-sub">Choose your role to continue</p>
+            <div class="role-buttons">
+              <button class="btn btn-primary btn-lg" onclick="showScreen('screen-instructor-login')">
+                <i class="ti ti-chalkboard" aria-hidden="true"></i> Instructor
+              </button>
+              <button class="btn btn-outline btn-lg" onclick="showScreen('screen-student-pick')">
+                <i class="ti ti-user" aria-hidden="true"></i> Student
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── INSTRUCTOR LOGIN ── -->
+      <section class="screen" id="screen-instructor-login" aria-label="Instructor login">
+        <div class="login-wrap">
+          <div class="login-card">
+            <div class="login-card-icon green"><i class="ti ti-chalkboard" aria-hidden="true"></i></div>
+            <h1 class="login-title">Instructor login</h1>
+            <p class="login-sub">Default: <code>instructor</code> / <code>admin123</code></p>
+            <div class="form-group">
+              <label class="form-label" for="ins-user">Username</label>
+              <input type="text" id="ins-user" placeholder="instructor" autocomplete="username" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="ins-pass">Password</label>
+              <input type="password" id="ins-pass" placeholder="••••••••" autocomplete="current-password" />
+            </div>
+            <p class="err" id="ins-err" role="alert"></p>
+            <div class="btn-row">
+              <button class="btn btn-outline" onclick="showScreen('screen-pick')">Back</button>
+              <button class="btn btn-primary flex1" onclick="instructorLogin()">Sign in</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── STUDENT PICK ── -->
+      <section class="screen" id="screen-student-pick" aria-label="Student options">
+        <div class="login-wrap">
+          <div class="login-card">
+            <div class="login-card-icon blue"><i class="ti ti-user" aria-hidden="true"></i></div>
+            <h1 class="login-title">Student</h1>
+            <p class="login-sub">Sign in or create an account</p>
+            <div class="role-buttons">
+              <button class="btn btn-primary btn-lg" onclick="showScreen('screen-student-login')">
+                <i class="ti ti-login" aria-hidden="true"></i> Sign in
+              </button>
+              <button class="btn btn-outline btn-lg" onclick="showScreen('screen-student-signup')">
+                <i class="ti ti-user-plus" aria-hidden="true"></i> Sign up
+              </button>
+            </div>
+            <div style="margin-top:14px">
+              <button class="btn btn-ghost btn-sm" onclick="showScreen('screen-pick')">
+                <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── STUDENT SIGNUP ── -->
+      <section class="screen" id="screen-student-signup" aria-label="Student sign up">
+        <div class="login-wrap">
+          <div class="login-card">
+            <div class="login-card-icon blue"><i class="ti ti-user-plus" aria-hidden="true"></i></div>
+            <h1 class="login-title">Create account</h1>
+            <p class="login-sub">Join as a student</p>
+            <div class="form-group">
+              <label class="form-label" for="signup-name">Full name</label>
+              <input type="text" id="signup-name" placeholder="Your full name" autocomplete="name" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="signup-pass">Password</label>
+              <input type="password" id="signup-pass" placeholder="Choose a password" autocomplete="new-password" />
+            </div>
+            <p class="err" id="signup-err" role="alert"></p>
+            <div class="btn-row">
+              <button class="btn btn-outline" onclick="showScreen('screen-student-pick')">Back</button>
+              <button class="btn btn-primary flex1" onclick="studentSignup()">Create account</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── STUDENT LOGIN ── -->
+      <section class="screen" id="screen-student-login" aria-label="Student login">
+        <div class="login-wrap">
+          <div class="login-card">
+            <div class="login-card-icon blue"><i class="ti ti-login" aria-hidden="true"></i></div>
+            <h1 class="login-title">Student sign in</h1>
+            <p class="login-sub">Use the name and password you registered with</p>
+            <div class="form-group">
+              <label class="form-label" for="slogin-name">Full name</label>
+              <input type="text" id="slogin-name" placeholder="Your full name" autocomplete="name" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="slogin-pass">Password</label>
+              <input type="password" id="slogin-pass" placeholder="Password" autocomplete="current-password" />
+            </div>
+            <p class="err" id="slogin-err" role="alert"></p>
+            <div class="btn-row">
+              <button class="btn btn-outline" onclick="showScreen('screen-student-pick')">Back</button>
+              <button class="btn btn-primary flex1" onclick="studentLogin()">Sign in</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── INSTRUCTOR DASHBOARD ── -->
+      <section class="screen" id="screen-instructor" aria-label="Instructor dashboard">
+        <nav class="tab-row" role="tablist">
+          <button class="tab active" role="tab" aria-selected="true" id="tab-btn-surveys" onclick="switchTab('surveys')">
+            <i class="ti ti-clipboard-list" aria-hidden="true"></i> Surveys
+          </button>
+          <button class="tab" role="tab" aria-selected="false" id="tab-btn-students" onclick="switchTab('students')">
+            <i class="ti ti-users" aria-hidden="true"></i> Students
+          </button>
+        </nav>
+
+        <div class="tab-panel" id="tab-surveys">
+          <div class="content">
+            <button class="btn btn-primary btn-sm" onclick="toggleAddWeek()">
+              <i class="ti ti-plus" aria-hidden="true"></i> Add week
+            </button>
+            <div class="add-week-form card" id="add-week-form" hidden>
+              <h2 class="card-heading">New week</h2>
+              <div class="form-group">
+                <label class="form-label" for="new-week-name">Week number or theme</label>
+                <input type="text" id="new-week-name" placeholder="e.g. Week 3 or Intro to Biology" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="new-survey-name">First survey name</label>
+                <input type="text" id="new-survey-name" placeholder="Survey name" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="new-survey-url">Survey link (URL)</label>
+                <input type="url" id="new-survey-url" placeholder="https://forms.google.com/..." />
+              </div>
+              <p class="err" id="new-week-err" role="alert"></p>
+              <div class="btn-row">
+                <button class="btn btn-outline btn-sm" onclick="toggleAddWeek()">Cancel</button>
+                <button class="btn btn-primary btn-sm" onclick="addWeek()">Add week</button>
+              </div>
+            </div>
+            <div id="instructor-weeks" class="weeks-list"></div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-students" hidden>
+          <div class="content">
+            <div id="students-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── STUDENT DASHBOARD ── -->
+      <section class="screen" id="screen-student" aria-label="Student dashboard">
+        <div class="content">
+          <div class="card progress-card" id="student-progress-wrap"></div>
+          <div id="student-weeks" class="weeks-list"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Firebase SDK (loaded as modules in app.js via type="module") -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>
