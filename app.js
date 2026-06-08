@@ -91,28 +91,33 @@ function signOut() {
 }
 window.signOut = signOut;
 
-// ── Live listener: weeks + their surveys ─────────────────────
-// Returns a Promise that resolves after the FIRST snapshot is processed.
-// After that it keeps listening and re-renders on every change.
+// ── Fetch all weeks + surveys from Firestore ─────────────────
+// Called manually after every write, and also by the snapshot listener.
+async function fetchWeeks() {
+  const snapshot = await getDocs(query(weeksCol, orderBy("order", "asc")));
+  const weeks = [];
+  for (const weekDoc of snapshot.docs) {
+    const data = weekDoc.data();
+    const surveysSnap = await getDocs(
+      query(collection(db, "weeks", weekDoc.id, "surveys"), orderBy("createdAt", "asc"))
+    );
+    const surveys = surveysSnap.docs.map(s => ({ id: s.id, ...s.data() }));
+    weeks.push({ id: weekDoc.id, name: data.name, order: data.order, surveys });
+  }
+  weeksCache = weeks;
+  if (currentRole === "instructor") renderInstructorWeeks();
+  if (currentRole === "student")    renderStudentView();
+}
+
+// ── Live listener: re-fetches everything when weeks collection changes ──
+// Also watches for week deletions. Survey sub-collection changes are
+// handled by calling fetchWeeks() directly after each write.
 function subscribeWeeks() {
   return new Promise((resolve) => {
     let firstSnapshot = true;
     const q = query(weeksCol, orderBy("order", "asc"));
-    onSnapshot(q, async (snapshot) => {
-      const weeks = [];
-      for (const weekDoc of snapshot.docs) {
-        const data = weekDoc.data();
-        const surveysSnap = await getDocs(
-          query(collection(db, "weeks", weekDoc.id, "surveys"), orderBy("createdAt", "asc"))
-        );
-        const surveys = surveysSnap.docs.map(s => ({ id: s.id, ...s.data() }));
-        weeks.push({ id: weekDoc.id, name: data.name, order: data.order, surveys });
-      }
-      weeksCache = weeks;
-      // Re-render whichever dashboard is currently showing
-      if (currentRole === "instructor") renderInstructorWeeks();
-      if (currentRole === "student")    renderStudentView();
-      // Resolve the promise on first load so boot() can continue
+    onSnapshot(q, async () => {
+      await fetchWeeks();
       if (firstSnapshot) { firstSnapshot = false; resolve(); }
     });
   });
@@ -224,6 +229,7 @@ async function addWeek() {
     await addDoc(collection(db, "weeks", weekRef.id, "surveys"), {
       name: sn, url: su, createdAt: Date.now(),
     });
+    await fetchWeeks();
     $("new-week-name").value  = "";
     $("new-survey-name").value = "";
     $("new-survey-url").value  = "";
@@ -257,6 +263,7 @@ async function addSurveyToWeek(weekId) {
     await addDoc(collection(db, "weeks", weekId, "surveys"), {
       name: sn, url: su, createdAt: Date.now(),
     });
+    await fetchWeeks();
     quickAddWeeks[weekId] = false;
   } catch (e) {
     setError(errId, "Error: " + e.message);
@@ -284,6 +291,7 @@ async function deleteSurvey(weekId, surveyId) {
   showLoading(true);
   try {
     await deleteDoc(doc(db, "weeks", weekId, "surveys", surveyId));
+    await fetchWeeks();
   } catch (e) { alert("Error: " + e.message); }
   showLoading(false);
 }
@@ -309,6 +317,7 @@ async function saveEditSurvey(weekId, surveyId) {
     await updateDoc(doc(db, "weeks", weekId, "surveys", surveyId), {
       name: newName, url: newUrl,
     });
+    await fetchWeeks();
     editingEntry = null;
   } catch (e) { alert("Error: " + e.message); }
   showLoading(false);
