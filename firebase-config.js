@@ -20,5 +20,5 @@ export const firebaseConfig = {
 export const INSTRUCTOR_CREDS = {
   user: "instructor",
   pass: "admin123",
-  ll
+  
 };
