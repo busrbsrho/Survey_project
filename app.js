@@ -1,5 +1,10 @@
 // ─────────────────────────────────────────────────────────────
 //  SurveyTrack — app.js  (Firebase Firestore version)
+//  Data shape:
+//    weeks/{id}               → { name, order, createdAt }
+//    weeks/{id}/surveys/{id}  → { name, url, date (YYYY-MM-DD), createdAt }
+//    students/{name}          → { pass, createdAt }
+//    completions/{name}/done/{surveyId} → { done, at }
 // ─────────────────────────────────────────────────────────────
 
 import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -16,19 +21,17 @@ import { firebaseConfig, INSTRUCTOR_CREDS } from "./firebase-config.js";
 const app = initializeApp(firebaseConfig);
 const db  = getFirestore(app);
 
-// ── Session (survives page refresh, clears when tab closes) ──
+// ── Session ──────────────────────────────────────────────────
 let currentUser = sessionStorage.getItem("st_user") || null;
 let currentRole = sessionStorage.getItem("st_role") || null;
 
 function saveSession(user, role) {
-  currentUser = user;
-  currentRole = role;
+  currentUser = user; currentRole = role;
   sessionStorage.setItem("st_user", user);
   sessionStorage.setItem("st_role", role);
 }
 function clearSession() {
-  currentUser = null;
-  currentRole = null;
+  currentUser = null; currentRole = null;
   sessionStorage.removeItem("st_user");
   sessionStorage.removeItem("st_role");
 }
@@ -38,10 +41,10 @@ let weeksCache = [];
 
 // ── UI state ─────────────────────────────────────────────────
 let expandedWeeks = {};
-let quickAddWeeks = {};
+let quickAddWeeks = {};  // weekId → boolean
 let editingEntry  = null;
 
-// ── DOM helper ───────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
 function esc(s) {
@@ -52,6 +55,26 @@ function esc(s) {
 function setErr(id, msg) { const e=$(id); if(e) e.textContent=msg; }
 function clrErr(id)      { setErr(id,""); }
 function loading(on)     { $("loading-overlay").style.display = on?"flex":"none"; }
+
+// ── Date formatting ───────────────────────────────────────────
+const DAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+
+function formatDate(dateStr) {
+  // dateStr is YYYY-MM-DD
+  if (!dateStr) return "No date";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  const dd   = String(d).padStart(2,"0");
+  const mm   = String(m).padStart(2,"0");
+  const yy   = String(y).slice(2);
+  const day  = DAY_NAMES[date.getDay()];
+  return `${dd}/${mm}/${yy} ${day}`;
+}
+
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
 
 // ── Screen routing ───────────────────────────────────────────
 window.showScreen = id => {
@@ -84,7 +107,6 @@ window.signOut = () => {
 };
 
 // ── Core data fetch ───────────────────────────────────────────
-// Always reads fresh from Firestore then re-renders.
 async function refreshWeeks() {
   const snap = await getDocs(query(collection(db,"weeks"), orderBy("order","asc")));
   const weeks = [];
@@ -101,7 +123,7 @@ async function refreshWeeks() {
   }
   weeksCache = weeks;
   if (currentRole === "instructor") renderInstructorWeeks();
-  if (currentRole === "student")    await renderStudentView();
+  if (currentRole === "student")    renderStudentView();
 }
 
 // ── Auth ─────────────────────────────────────────────────────
@@ -132,7 +154,7 @@ window.studentSignup = async () => {
     await setDoc(ref, { pass, createdAt: Date.now() });
     saveSession(name,"student");
     updateTopbar("Student",name);
-    await renderStudentView();
+    renderStudentView();
     showScreen("screen-student");
   } catch(e) { setErr("signup-err","Error: "+e.message); }
   loading(false);
@@ -149,7 +171,7 @@ window.studentLogin = async () => {
       return setErr("slogin-err","Name or password is incorrect.");
     saveSession(name,"student");
     updateTopbar("Student",name);
-    await renderStudentView();
+    renderStudentView();
     showScreen("screen-student");
   } catch(e) { setErr("slogin-err","Error: "+e.message); }
   loading(false);
@@ -171,7 +193,12 @@ window.switchTab = tab => {
 window.toggleAddWeek = () => {
   const f = $("add-week-form");
   f.hidden = !f.hidden;
-  if (!f.hidden) { clrErr("new-week-err"); $("new-week-name").focus(); }
+  if (!f.hidden) {
+    clrErr("new-week-err");
+    $("new-week-name").focus();
+    // Default date to today
+    $("new-survey-date").value = todayISO();
+  }
 };
 
 window.addWeek = async () => {
@@ -179,20 +206,23 @@ window.addWeek = async () => {
   const wn = $("new-week-name").value.trim();
   const sn = $("new-survey-name").value.trim();
   const su = $("new-survey-url").value.trim();
+  const sd = $("new-survey-date").value;
   if (!wn) return setErr("new-week-err","Please enter a week name.");
   if (!sn) return setErr("new-week-err","Please enter the survey name.");
   if (!su) return setErr("new-week-err","Please enter the survey URL.");
+  if (!sd) return setErr("new-week-err","Please pick a date.");
   loading(true);
   try {
     const wRef = await addDoc(collection(db,"weeks"), {
       name: wn, order: Date.now(), createdAt: Date.now()
     });
     await addDoc(collection(db,"weeks",wRef.id,"surveys"), {
-      name: sn, url: su, createdAt: Date.now()
+      name: sn, url: su, date: sd, createdAt: Date.now()
     });
     $("new-week-name").value   = "";
     $("new-survey-name").value = "";
     $("new-survey-url").value  = "";
+    $("new-survey-date").value = "";
     $("add-week-form").hidden  = true;
     await refreshWeeks();
   } catch(e) { setErr("new-week-err","Error: "+e.message); }
@@ -203,8 +233,13 @@ window.addWeek = async () => {
 window.toggleQuickAdd = weekId => {
   quickAddWeeks[weekId] = !quickAddWeeks[weekId];
   renderInstructorWeeks();
-  if (quickAddWeeks[weekId])
-    setTimeout(() => $("qs-name-"+weekId)?.focus(), 50);
+  if (quickAddWeeks[weekId]) {
+    setTimeout(() => {
+      $("qs-name-"+weekId)?.focus();
+      const dateEl = $("qs-date-"+weekId);
+      if (dateEl && !dateEl.value) dateEl.value = todayISO();
+    }, 50);
+  }
 };
 
 window.addSurveyToWeek = async weekId => {
@@ -212,11 +247,13 @@ window.addSurveyToWeek = async weekId => {
   clrErr(errId);
   const sn = $("qs-name-"+weekId)?.value.trim();
   const su = $("qs-url-" +weekId)?.value.trim();
-  if (!sn||!su) return setErr(errId,"Please fill in both fields.");
+  const sd = $("qs-date-"+weekId)?.value;
+  if (!sn||!su) return setErr(errId,"Please fill in name and URL.");
+  if (!sd)      return setErr(errId,"Please pick a date.");
   loading(true);
   try {
     await addDoc(collection(db,"weeks",weekId,"surveys"), {
-      name: sn, url: su, createdAt: Date.now()
+      name: sn, url: su, date: sd, createdAt: Date.now()
     });
     quickAddWeeks[weekId] = false;
     await refreshWeeks();
@@ -260,15 +297,32 @@ window.cancelEdit = () => { editingEntry = null; renderInstructorWeeks(); };
 window.saveEditSurvey = async (weekId, surveyId) => {
   const n = $("edit-name-"+surveyId)?.value.trim();
   const u = $("edit-url-" +surveyId)?.value.trim();
-  if (!n||!u) return;
+  const d = $("edit-date-"+surveyId)?.value;
+  if (!n||!u||!d) return;
   loading(true);
   try {
-    await updateDoc(doc(db,"weeks",weekId,"surveys",surveyId), { name:n, url:u });
+    await updateDoc(doc(db,"weeks",weekId,"surveys",surveyId), { name:n, url:u, date:d });
     editingEntry = null;
     await refreshWeeks();
   } catch(e) { alert("Error: "+e.message); }
   loading(false);
 };
+
+// ── Group surveys by date ─────────────────────────────────────
+function groupByDate(surveys) {
+  const map = {};
+  for (const s of surveys) {
+    const key = s.date || "no-date";
+    if (!map[key]) map[key] = [];
+    map[key].push(s);
+  }
+  // Sort dates ascending, "no-date" at end
+  return Object.entries(map).sort(([a],[b]) => {
+    if (a==="no-date") return 1;
+    if (b==="no-date") return -1;
+    return a < b ? -1 : 1;
+  });
+}
 
 // ── Render: instructor weeks ──────────────────────────────────
 function renderInstructorWeeks() {
@@ -277,34 +331,50 @@ function renderInstructorWeeks() {
     c.innerHTML = '<div class="empty">No weeks yet. Click "Add week" to get started.</div>';
     return;
   }
+
   c.innerHTML = weeksCache.map(week => {
     const collapsed = expandedWeeks[week.id] === false;
     const showQA    = quickAddWeeks[week.id];
+    const byDate    = groupByDate(week.surveys);
 
-    const surveysHtml = week.surveys.map(s => {
-      if (editingEntry?.weekId===week.id && editingEntry?.surveyId===s.id) {
-        return `<div class="survey-row">
-          <div class="edit-row-inputs">
-            <input id="edit-name-${esc(s.id)}" type="text" value="${esc(s.name)}" placeholder="Survey name"/>
-            <input id="edit-url-${esc(s.id)}"  type="url"  value="${esc(s.url)}"  placeholder="https://..."/>
-          </div>
-          <button class="btn btn-primary btn-sm" onclick="saveEditSurvey('${esc(week.id)}','${esc(s.id)}')">Save</button>
-          <button class="btn btn-ghost btn-sm"   onclick="cancelEdit()">Cancel</button>
-        </div>`;
-      }
-      return `<div class="survey-row">
-        <span class="survey-name">${esc(s.name)}</span>
-        <a href="${esc(s.url)}" target="_blank" rel="noopener" class="survey-link-icon" title="Open">
-          <i class="ti ti-external-link"></i>
-        </a>
-        <button class="btn btn-ghost btn-sm" onclick="startEditSurvey('${esc(week.id)}','${esc(s.id)}')" title="Edit">
-          <i class="ti ti-edit"></i>
-        </button>
-        <button class="btn btn-danger btn-sm" onclick="deleteSurvey('${esc(week.id)}','${esc(s.id)}')" title="Delete">
-          <i class="ti ti-trash"></i>
-        </button>
-      </div>`;
-    }).join("") || '<div class="empty" style="padding:6px 0">No surveys yet.</div>';
+    // Build date-grouped survey rows
+    const datesHtml = byDate.length === 0
+      ? '<div class="empty" style="padding:6px 0">No surveys yet.</div>'
+      : byDate.map(([dateKey, surveys]) => {
+          const surveysHtml = surveys.map(s => {
+            if (editingEntry?.weekId===week.id && editingEntry?.surveyId===s.id) {
+              return `<div class="survey-row">
+                <div class="edit-row-inputs">
+                  <input id="edit-name-${esc(s.id)}" type="text" value="${esc(s.name)}" placeholder="Survey name"/>
+                  <input id="edit-url-${esc(s.id)}"  type="url"  value="${esc(s.url)}"  placeholder="https://..."/>
+                  <input id="edit-date-${esc(s.id)}" type="date" value="${esc(s.date||"")}"/>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="saveEditSurvey('${esc(week.id)}','${esc(s.id)}')">Save</button>
+                <button class="btn btn-ghost btn-sm"   onclick="cancelEdit()">Cancel</button>
+              </div>`;
+            }
+            return `<div class="survey-row">
+              <span class="survey-name">${esc(s.name)}</span>
+              <a href="${esc(s.url)}" target="_blank" rel="noopener" class="survey-link-icon" title="Open">
+                <i class="ti ti-external-link"></i>
+              </a>
+              <button class="btn btn-ghost btn-sm" onclick="startEditSurvey('${esc(week.id)}','${esc(s.id)}')" title="Edit">
+                <i class="ti ti-edit"></i>
+              </button>
+              <button class="btn btn-danger btn-sm" onclick="deleteSurvey('${esc(week.id)}','${esc(s.id)}')" title="Delete">
+                <i class="ti ti-trash"></i>
+              </button>
+            </div>`;
+          }).join("");
+
+          return `<div class="date-group">
+            <div class="date-label">
+              <i class="ti ti-calendar-event" style="font-size:13px"></i>
+              ${esc(formatDate(dateKey))}
+            </div>
+            ${surveysHtml}
+          </div>`;
+        }).join("");
 
     const qaForm = showQA ? `<div class="inline-form">
       <div class="form-group">
@@ -315,6 +385,10 @@ function renderInstructorWeeks() {
         <label class="form-label">Link</label>
         <input id="qs-url-${esc(week.id)}" type="url" placeholder="https://..."/>
       </div>
+      <div class="form-group">
+        <label class="form-label">Date</label>
+        <input id="qs-date-${esc(week.id)}" type="date"/>
+      </div>
       <p class="err" id="qs-err-${esc(week.id)}"></p>
       <div class="btn-row" style="margin-top:10px">
         <button class="btn btn-outline btn-sm" onclick="toggleQuickAdd('${esc(week.id)}')">Cancel</button>
@@ -322,17 +396,18 @@ function renderInstructorWeeks() {
       </div>
     </div>` : "";
 
+    const totalSurveys = week.surveys.length;
     return `<div class="week-block${collapsed?" collapsed":""}">
       <div class="week-header" onclick="toggleWeek('${esc(week.id)}')" role="button" aria-expanded="${!collapsed}">
         <i class="ti ti-calendar-week" style="font-size:16px;color:var(--text-3)"></i>
         <span class="week-label">${esc(week.name)}</span>
         <div class="week-meta">
-          <span class="week-count">${week.surveys.length} survey${week.surveys.length!==1?"s":""}</span>
+          <span class="week-count">${totalSurveys} survey${totalSurveys!==1?"s":""}</span>
           <i class="ti ti-chevron-down chevron"></i>
         </div>
       </div>
       <div class="week-body">
-        ${surveysHtml}
+        ${datesHtml}
         <div class="week-actions">
           <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();toggleQuickAdd('${esc(week.id)}')">
             <i class="ti ti-plus"></i> Add survey
@@ -360,17 +435,13 @@ async function renderStudents() {
     const snap  = await getDocs(collection(db,"students"));
     const total = weeksCache.reduce((a,w) => a+w.surveys.length, 0);
     if (snap.empty) { c.innerHTML='<div class="empty">No students yet.</div>'; return; }
-    // Build a set of all currently existing survey IDs
-    const existingSurveyIds = new Set(
-      weeksCache.flatMap(w => w.surveys.map(s => s.id))
-    );
+    const existingSurveyIds = new Set(weeksCache.flatMap(w => w.surveys.map(s => s.id)));
     const rows = await Promise.all(snap.docs.map(async d => {
       const name     = d.id;
       const initials = name.split(" ").map(x=>x[0]).join("").toUpperCase().slice(0,2);
       let done = 0;
       try {
         const compSnap = await getDocs(collection(db,"completions",name,"done"));
-        // Only count completions for surveys that still exist
         done = compSnap.docs.filter(d => existingSurveyIds.has(d.id)).length;
       } catch{}
       const pct = total ? Math.round(done/total*100) : 0;
@@ -402,11 +473,10 @@ async function renderStudentView() {
       .forEach(d => { comp[d.id]=true; });
   } catch {}
 
-  const total = weeksCache.reduce((a,w) => a+w.surveys.length, 0);
-  // Only count completions for surveys that still exist
+  const total      = weeksCache.reduce((a,w) => a+w.surveys.length, 0);
   const existingIds = new Set(weeksCache.flatMap(w => w.surveys.map(s => s.id)));
-  const done  = Object.keys(comp).filter(id => existingIds.has(id)).length;
-  const pct   = total ? Math.round(done/total*100) : 0;
+  const done       = Object.keys(comp).filter(id => existingIds.has(id)).length;
+  const pct        = total ? Math.round(done/total*100) : 0;
 
   progWrap.innerHTML = `
     <div class="progress-title">Your progress</div>
@@ -423,29 +493,43 @@ async function renderStudentView() {
   }
 
   weeksEl.innerHTML = weeksCache.map(week => {
-    const wDone   = week.surveys.filter(s=>comp[s.id]).length;
-    const allDone = wDone===week.surveys.length && week.surveys.length>0;
-    const rows = week.surveys.map(s => {
-      const checked = comp[s.id] ? "checked" : "";
-      return `<div class="check-row">
-        <input type="checkbox" id="chk-${esc(s.id)}" ${checked}
-          onchange="toggleComplete('${esc(s.id)}',this.checked)"/>
-        <label class="check-label${checked?" done":""}" for="chk-${esc(s.id)}">${esc(s.name)}</label>
-        <a href="${esc(s.url)}" target="_blank" rel="noopener" class="open-link">
-          <i class="ti ti-external-link"></i> Open
-        </a>
+    const wDone   = week.surveys.filter(s => existingIds.has(s.id) && comp[s.id]).length;
+    const wTotal  = week.surveys.filter(s => existingIds.has(s.id)).length;
+    const allDone = wTotal > 0 && wDone === wTotal;
+    const byDate  = groupByDate(week.surveys);
+
+    const datesHtml = byDate.map(([dateKey, surveys]) => {
+      const rows = surveys.map(s => {
+        const checked = comp[s.id] ? "checked" : "";
+        return `<div class="check-row">
+          <input type="checkbox" id="chk-${esc(s.id)}" ${checked}
+            onchange="toggleComplete('${esc(s.id)}',this.checked)"/>
+          <label class="check-label${checked?" done":""}" for="chk-${esc(s.id)}">${esc(s.name)}</label>
+          <a href="${esc(s.url)}" target="_blank" rel="noopener" class="open-link">
+            <i class="ti ti-external-link"></i> Open
+          </a>
+        </div>`;
+      }).join("");
+
+      return `<div class="date-group">
+        <div class="date-label">
+          <i class="ti ti-calendar-event" style="font-size:13px"></i>
+          ${esc(formatDate(dateKey))}
+        </div>
+        ${rows}
       </div>`;
     }).join("");
+
     return `<div class="week-block">
       <div class="week-header" style="cursor:default">
         <i class="ti ti-calendar-week" style="font-size:16px;color:var(--text-3)"></i>
         <span class="week-label">${esc(week.name)}</span>
         <div class="week-meta">
-          <span class="week-count${allDone?" all-done":""}">${wDone} / ${week.surveys.length}</span>
+          <span class="week-count${allDone?" all-done":""}">${wDone} / ${wTotal}</span>
           ${allDone?'<i class="ti ti-circle-check" style="font-size:16px;color:var(--green)"></i>':""}
         </div>
       </div>
-      <div class="week-body">${rows}</div>
+      <div class="week-body">${datesHtml}</div>
     </div>`;
   }).join("");
 }
@@ -455,7 +539,7 @@ window.toggleComplete = async (surveyId, checked) => {
     const ref = doc(db,"completions",currentUser,"done",surveyId);
     if (checked) await setDoc(ref,{done:true,at:Date.now()});
     else         await deleteDoc(ref);
-    await renderStudentView();
+    renderStudentView();
   } catch(e) { alert("Error: "+e.message); }
 };
 
@@ -468,16 +552,13 @@ document.addEventListener("keydown", e => {
   else if (id==="screen-student-signup") studentSignup();
 });
 
-// ── Auto-refresh: keeps student view in sync with instructor changes ──
-// Polls Firestore every 20 seconds while the app is open.
-setInterval(async () => {
-  await refreshWeeks();
-}, 20000);
+// ── Auto-refresh every 20s ────────────────────────────────────
+setInterval(() => refreshWeeks(), 20000);
 
 // ── Boot ──────────────────────────────────────────────────────
 (async () => {
   loading(true);
-  await refreshWeeks();                      // load data first
+  await refreshWeeks();
 
   if (currentRole === "instructor") {
     updateTopbar("Instructor","Instructor");
@@ -485,7 +566,7 @@ setInterval(async () => {
     showScreen("screen-instructor");
   } else if (currentRole === "student" && currentUser) {
     updateTopbar("Student", currentUser);
-    await renderStudentView();
+    renderStudentView();
     showScreen("screen-student");
   }
 

@@ -568,3 +568,29 @@ input[type="checkbox"] {
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Date groups (inside week blocks) ─────────────────────── */
+.date-group {
+  margin-bottom: 6px;
+}
+.date-group:last-child {
+  margin-bottom: 0;
+}
+
+.date-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 8px 0 4px;
+  border-bottom: 0.5px solid var(--border);
+  margin-bottom: 2px;
+}
+
+.date-group:first-child .date-label {
+  padding-top: 2px;
+}
