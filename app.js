@@ -37,7 +37,9 @@ function clearSession() {
 }
 
 // ── In-memory cache ──────────────────────────────────────────
-let weeksCache = [];
+let weeksCache       = [];
+let studentsCache    = [];   // [name, name, ...]
+let completionsCache = {};   // { studentName: Set([surveyId, ...]) }
 
 // ── UI state ─────────────────────────────────────────────────
 let expandedWeeks = {};
@@ -108,6 +110,7 @@ window.signOut = () => {
 
 // ── Core data fetch ───────────────────────────────────────────
 async function refreshWeeks() {
+  // Load weeks + surveys
   const snap = await getDocs(query(collection(db,"weeks"), orderBy("order","asc")));
   const weeks = [];
   for (const wDoc of snap.docs) {
@@ -122,8 +125,22 @@ async function refreshWeeks() {
     });
   }
   weeksCache = weeks;
-  if (currentRole === "instructor") renderInstructorWeeks();
-  if (currentRole === "student")    renderStudentView();
+
+  // For instructor: also load students + their completions
+  if (currentRole === "instructor") {
+    const studSnap = await getDocs(collection(db,"students"));
+    studentsCache = studSnap.docs.map(d => d.id);
+    // Load each student's completions
+    completionsCache = {};
+    await Promise.all(studentsCache.map(async name => {
+      try {
+        const compSnap = await getDocs(collection(db,"completions",name,"done"));
+        completionsCache[name] = new Set(compSnap.docs.map(d => d.id));
+      } catch { completionsCache[name] = new Set(); }
+    }));
+    renderInstructorWeeks();
+  }
+  if (currentRole === "student") renderStudentView();
 }
 
 // ── Auth ─────────────────────────────────────────────────────
@@ -353,17 +370,40 @@ function renderInstructorWeeks() {
                 <button class="btn btn-ghost btn-sm"   onclick="cancelEdit()">Cancel</button>
               </div>`;
             }
-            return `<div class="survey-row">
-              <span class="survey-name">${esc(s.name)}</span>
-              <a href="${esc(s.url)}" target="_blank" rel="noopener" class="survey-link-icon" title="Open">
-                <i class="ti ti-external-link"></i>
-              </a>
-              <button class="btn btn-ghost btn-sm" onclick="startEditSurvey('${esc(week.id)}','${esc(s.id)}')" title="Edit">
-                <i class="ti ti-edit"></i>
-              </button>
-              <button class="btn btn-danger btn-sm" onclick="deleteSurvey('${esc(week.id)}','${esc(s.id)}')" title="Delete">
-                <i class="ti ti-trash"></i>
-              </button>
+            // Calculate who hasn't answered this survey
+            const pending = studentsCache.filter(name =>
+              !completionsCache[name]?.has(s.id)
+            );
+            const pendingId = "pending-"+esc(s.id);
+            const pendingHtml = pending.length === 0
+              ? `<div class="pending-all-done"><i class="ti ti-circle-check"></i> All students answered</div>`
+              : pending.map(name => {
+                  const initials = name.split(" ").map(x=>x[0]).join("").toUpperCase().slice(0,2);
+                  return `<div class="pending-student"><div class="avatar avatar-xs">${esc(initials)}</div>${esc(name)}</div>`;
+                }).join("");
+
+            return `<div class="survey-wrap">
+              <div class="survey-row">
+                <span class="survey-name">${esc(s.name)}</span>
+                <a href="${esc(s.url)}" target="_blank" rel="noopener" class="survey-link-icon" title="Open">
+                  <i class="ti ti-external-link"></i>
+                </a>
+                <button class="btn btn-ghost btn-sm" onclick="startEditSurvey('${esc(week.id)}','${esc(s.id)}')" title="Edit">
+                  <i class="ti ti-edit"></i>
+                </button>
+                <button class="btn btn-danger btn-sm" onclick="deleteSurvey('${esc(week.id)}','${esc(s.id)}')" title="Delete">
+                  <i class="ti ti-trash"></i>
+                </button>
+                <button class="btn btn-ghost btn-sm pending-toggle${pending.length===0?" pending-done":""}"
+                  onclick="togglePending('${esc(s.id)}')" title="Who hasn't answered">
+                  <i class="ti ti-users"></i>
+                  ${studentsCache.length > 0 ? `<span class="pending-badge">${pending.length}</span>` : ""}
+                </button>
+              </div>
+              <div class="pending-panel" id="${pendingId}" hidden>
+                <div class="pending-label">Not answered yet (${pending.length} / ${studentsCache.length})</div>
+                <div class="pending-list">${pendingHtml}</div>
+              </div>
             </div>`;
           }).join("");
 
@@ -421,6 +461,11 @@ function renderInstructorWeeks() {
     </div>`;
   }).join("");
 }
+
+window.togglePending = id => {
+  const panel = document.getElementById("pending-"+id);
+  if (panel) panel.hidden = !panel.hidden;
+};
 
 window.toggleWeek = id => {
   expandedWeeks[id] = expandedWeeks[id]===false ? true : false;
