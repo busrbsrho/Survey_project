@@ -468,6 +468,12 @@ document.addEventListener("keydown", e => {
   else if (id==="screen-student-signup") studentSignup();
 });
 
+// ── Auto-refresh: keeps student view in sync with instructor changes ──
+// Polls Firestore every 20 seconds while the app is open.
+setInterval(async () => {
+  await refreshWeeks();
+}, 20000);
+
 // ── Boot ──────────────────────────────────────────────────────
 (async () => {
   loading(true);
