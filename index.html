@@ -11,7 +11,6 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
 </head>
 <body>
-
   <div class="app" id="app">
 
     <!-- TOP BAR -->
@@ -26,44 +25,44 @@
       <div class="topbar-right">
         <span class="role-badge" id="role-badge" hidden></span>
         <button class="btn btn-ghost btn-sm" id="signout-btn" hidden onclick="signOut()">
-          <i class="ti ti-logout" aria-hidden="true"></i> Sign out
+          <i class="ti ti-logout"></i> Sign out
         </button>
       </div>
     </header>
 
     <!-- LOADING OVERLAY -->
-    <div id="loading-overlay" class="loading-overlay">
-      <div class="spinner"></div>
-    </div>
+    <div id="loading-overlay" class="loading-overlay"><div class="spinner"></div></div>
 
-    <!-- SCREENS CONTAINER -->
     <main class="screens">
 
       <!-- ── ROLE PICKER ── -->
-      <section class="screen active" id="screen-pick" aria-label="Role selection">
+      <section class="screen active" id="screen-pick">
         <div class="login-wrap">
           <div class="login-card">
-            <div class="login-card-icon green"><i class="ti ti-clipboard-list" aria-hidden="true"></i></div>
+            <div class="login-card-icon green"><i class="ti ti-clipboard-list"></i></div>
             <h1 class="login-title">Welcome to SurveyTrack</h1>
             <p class="login-sub">Choose your role to continue</p>
             <div class="role-buttons">
               <button class="btn btn-primary btn-lg" onclick="showScreen('screen-instructor-login')">
-                <i class="ti ti-chalkboard" aria-hidden="true"></i> Instructor
+                <i class="ti ti-chalkboard"></i> Surveys Instructor
+              </button>
+              <button class="btn btn-outline btn-lg" onclick="showScreen('screen-grades-login')">
+                <i class="ti ti-chart-bar"></i> Grades Instructor
               </button>
               <button class="btn btn-outline btn-lg" onclick="showScreen('screen-student-pick')">
-                <i class="ti ti-user" aria-hidden="true"></i> Student
+                <i class="ti ti-user"></i> Student
               </button>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- ── INSTRUCTOR LOGIN ── -->
-      <section class="screen" id="screen-instructor-login" aria-label="Instructor login">
+      <!-- ── SURVEYS INSTRUCTOR LOGIN ── -->
+      <section class="screen" id="screen-instructor-login">
         <div class="login-wrap">
           <div class="login-card">
-            <div class="login-card-icon green"><i class="ti ti-chalkboard" aria-hidden="true"></i></div>
-            <h1 class="login-title">Instructor login</h1>
+            <div class="login-card-icon green"><i class="ti ti-chalkboard"></i></div>
+            <h1 class="login-title">Surveys Instructor</h1>
             <p class="login-sub">Default: <code>instructor</code> / <code>admin123</code></p>
             <div class="form-group">
               <label class="form-label" for="ins-user">Username</label>
@@ -82,24 +81,48 @@
         </div>
       </section>
 
-      <!-- ── STUDENT PICK ── -->
-      <section class="screen" id="screen-student-pick" aria-label="Student options">
+      <!-- ── GRADES INSTRUCTOR LOGIN ── -->
+      <section class="screen" id="screen-grades-login">
         <div class="login-wrap">
           <div class="login-card">
-            <div class="login-card-icon blue"><i class="ti ti-user" aria-hidden="true"></i></div>
+            <div class="login-card-icon purple"><i class="ti ti-chart-bar"></i></div>
+            <h1 class="login-title">Grades Instructor</h1>
+            <p class="login-sub">Default: <code>grades</code> / <code>grades123</code></p>
+            <div class="form-group">
+              <label class="form-label" for="grd-user">Username</label>
+              <input type="text" id="grd-user" placeholder="grades" autocomplete="username" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="grd-pass">Password</label>
+              <input type="password" id="grd-pass" placeholder="••••••••" autocomplete="current-password" />
+            </div>
+            <p class="err" id="grd-err" role="alert"></p>
+            <div class="btn-row">
+              <button class="btn btn-outline" onclick="showScreen('screen-pick')">Back</button>
+              <button class="btn btn-primary flex1" onclick="gradesLogin()">Sign in</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── STUDENT PICK ── -->
+      <section class="screen" id="screen-student-pick">
+        <div class="login-wrap">
+          <div class="login-card">
+            <div class="login-card-icon blue"><i class="ti ti-user"></i></div>
             <h1 class="login-title">Student</h1>
             <p class="login-sub">Sign in or create an account</p>
             <div class="role-buttons">
               <button class="btn btn-primary btn-lg" onclick="showScreen('screen-student-login')">
-                <i class="ti ti-login" aria-hidden="true"></i> Sign in
+                <i class="ti ti-login"></i> Sign in
               </button>
               <button class="btn btn-outline btn-lg" onclick="showScreen('screen-student-signup')">
-                <i class="ti ti-user-plus" aria-hidden="true"></i> Sign up
+                <i class="ti ti-user-plus"></i> Sign up
               </button>
             </div>
             <div style="margin-top:14px">
               <button class="btn btn-ghost btn-sm" onclick="showScreen('screen-pick')">
-                <i class="ti ti-arrow-left" aria-hidden="true"></i> Back
+                <i class="ti ti-arrow-left"></i> Back
               </button>
             </div>
           </div>
@@ -107,10 +130,10 @@
       </section>
 
       <!-- ── STUDENT SIGNUP ── -->
-      <section class="screen" id="screen-student-signup" aria-label="Student sign up">
+      <section class="screen" id="screen-student-signup">
         <div class="login-wrap">
           <div class="login-card">
-            <div class="login-card-icon blue"><i class="ti ti-user-plus" aria-hidden="true"></i></div>
+            <div class="login-card-icon blue"><i class="ti ti-user-plus"></i></div>
             <h1 class="login-title">Create account</h1>
             <p class="login-sub">Join as a student</p>
             <div class="form-group">
@@ -131,10 +154,10 @@
       </section>
 
       <!-- ── STUDENT LOGIN ── -->
-      <section class="screen" id="screen-student-login" aria-label="Student login">
+      <section class="screen" id="screen-student-login">
         <div class="login-wrap">
           <div class="login-card">
-            <div class="login-card-icon blue"><i class="ti ti-login" aria-hidden="true"></i></div>
+            <div class="login-card-icon blue"><i class="ti ti-login"></i></div>
             <h1 class="login-title">Student sign in</h1>
             <p class="login-sub">Use the name and password you registered with</p>
             <div class="form-group">
@@ -154,21 +177,20 @@
         </div>
       </section>
 
-      <!-- ── INSTRUCTOR DASHBOARD ── -->
-      <section class="screen" id="screen-instructor" aria-label="Instructor dashboard">
+      <!-- ── SURVEYS INSTRUCTOR DASHBOARD ── -->
+      <section class="screen" id="screen-instructor">
         <nav class="tab-row" role="tablist">
-          <button class="tab active" role="tab" aria-selected="true" id="tab-btn-surveys" onclick="switchTab('surveys')">
-            <i class="ti ti-clipboard-list" aria-hidden="true"></i> Surveys
+          <button class="tab active" role="tab" id="tab-btn-surveys" onclick="switchTab('surveys')">
+            <i class="ti ti-clipboard-list"></i> Surveys
           </button>
-          <button class="tab" role="tab" aria-selected="false" id="tab-btn-students" onclick="switchTab('students')">
-            <i class="ti ti-users" aria-hidden="true"></i> Students
+          <button class="tab" role="tab" id="tab-btn-students" onclick="switchTab('students')">
+            <i class="ti ti-users"></i> Students
           </button>
         </nav>
-
         <div class="tab-panel" id="tab-surveys">
           <div class="content">
             <button class="btn btn-primary btn-sm" onclick="toggleAddWeek()">
-              <i class="ti ti-plus" aria-hidden="true"></i> Add week
+              <i class="ti ti-plus"></i> Add week
             </button>
             <div class="add-week-form card" id="add-week-form" hidden>
               <h2 class="card-heading">New week</h2>
@@ -197,26 +219,72 @@
             <div id="instructor-weeks" class="weeks-list"></div>
           </div>
         </div>
-
         <div class="tab-panel" id="tab-students" hidden>
+          <div class="content"><div id="students-list"></div></div>
+        </div>
+      </section>
+
+      <!-- ── GRADES INSTRUCTOR DASHBOARD ── -->
+      <section class="screen" id="screen-grades">
+        <nav class="tab-row" role="tablist">
+          <button class="tab active" role="tab" id="gtab-btn-subjects" onclick="switchGradesTab('subjects')">
+            <i class="ti ti-books"></i> Subjects
+          </button>
+          <button class="tab" role="tab" id="gtab-btn-overview" onclick="switchGradesTab('overview')">
+            <i class="ti ti-table"></i> Overview
+          </button>
+        </nav>
+        <div class="tab-panel" id="gtab-subjects">
           <div class="content">
-            <div id="students-list"></div>
+            <button class="btn btn-primary btn-sm" onclick="toggleAddSubject()">
+              <i class="ti ti-plus"></i> Add subject
+            </button>
+            <div class="add-week-form card" id="add-subject-form" hidden>
+              <h2 class="card-heading">New subject</h2>
+              <div class="form-group">
+                <label class="form-label" for="new-subject-name">Subject name</label>
+                <input type="text" id="new-subject-name" placeholder="e.g. Mathematics, Biology..." />
+              </div>
+              <p class="err" id="new-subject-err" role="alert"></p>
+              <div class="btn-row">
+                <button class="btn btn-outline btn-sm" onclick="toggleAddSubject()">Cancel</button>
+                <button class="btn btn-primary btn-sm" onclick="addSubject()">Add subject</button>
+              </div>
+            </div>
+            <div id="subjects-list" class="weeks-list"></div>
           </div>
+        </div>
+        <div class="tab-panel" id="gtab-overview" hidden>
+          <div class="content"><div id="grades-overview"></div></div>
         </div>
       </section>
 
       <!-- ── STUDENT DASHBOARD ── -->
-      <section class="screen" id="screen-student" aria-label="Student dashboard">
-        <div class="content">
-          <div class="card progress-card" id="student-progress-wrap"></div>
-          <div id="student-weeks" class="weeks-list"></div>
+      <section class="screen" id="screen-student">
+        <nav class="tab-row" role="tablist">
+          <button class="tab active" role="tab" id="stab-btn-surveys" onclick="switchStudentTab('surveys')">
+            <i class="ti ti-clipboard-list"></i> Surveys
+          </button>
+          <button class="tab" role="tab" id="stab-btn-grades" onclick="switchStudentTab('grades')">
+            <i class="ti ti-chart-bar"></i> Grades
+          </button>
+        </nav>
+        <div class="tab-panel" id="stab-surveys">
+          <div class="content">
+            <div class="card progress-card" id="student-progress-wrap"></div>
+            <div id="student-weeks" class="weeks-list"></div>
+          </div>
+        </div>
+        <div class="tab-panel" id="stab-grades" hidden>
+          <div class="content">
+            <p style="font-size:13px;color:var(--text-2);margin-bottom:4px">Enter your grade for each subject.</p>
+            <div id="student-grades-list" class="weeks-list"></div>
+          </div>
         </div>
       </section>
 
     </main>
   </div>
-
-  <!-- Firebase SDK (loaded as modules in app.js via type="module") -->
   <script type="module" src="app.js"></script>
 </body>
 </html>

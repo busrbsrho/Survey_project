@@ -22,3 +22,8 @@ export const INSTRUCTOR_CREDS = {
   pass: "א",
   
 };
+
+export const GRADES_CREDS = {
+  user: "קהד",
+  pass: "1",
+};
