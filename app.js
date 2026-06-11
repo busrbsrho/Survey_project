@@ -500,46 +500,69 @@ function renderSubjects() {
 }
 
 // ── GRADES OVERVIEW (grades instructor) ───────────────────────
+let gradesMapCache = {};
+
+window.filterGrades = () => {
+  const q = ($("grades-search")?.value || "").trim().toLowerCase();
+  const rows = document.querySelectorAll(".grades-table tbody tr");
+  let visible = 0;
+  rows.forEach(row => {
+    const name = (row.querySelector(".grade-student-name")?.textContent || "").toLowerCase();
+    const show = name.includes(q);
+    row.style.display = show ? "" : "none";
+    if (show) visible++;
+  });
+  const empty = $("grades-no-results");
+  if (empty) empty.hidden = visible > 0;
+};
+
 async function renderGradesOverview() {
   const c=$("grades-overview"); c.innerHTML='<div class="empty">Loading…</div>';
   if (!subjectsCache.length){ c.innerHTML='<div class="empty">No subjects added yet.</div>'; return; }
   if (!studentsCache.length){ c.innerHTML='<div class="empty">No students registered yet.</div>'; return; }
   try {
-    // Load all grades
-    const gradesMap={};  // { studentName: { subjectId: grade } }
+    gradesMapCache={};
     await Promise.all(studentsCache.map(async name=>{
-      gradesMap[name]={};
+      gradesMapCache[name]={};
       try {
         const snap=await getDocs(collection(db,"grades",name,"scores"));
-        snap.forEach(d=>{ gradesMap[name][d.id]=d.data().grade; });
+        snap.forEach(d=>{ gradesMapCache[name][d.id]=d.data().grade; });
       } catch{}
     }));
 
-    // Build table
     const headerCells=subjectsCache.map(s=>`<th class="grade-th">${esc(s.name)}</th>`).join("");
     const rows=studentsCache.map(name=>{
       const ini=name.split(" ").map(x=>x[0]).join("").toUpperCase().slice(0,2);
       const cells=subjectsCache.map(sub=>{
-        const g=gradesMap[name]?.[sub.id];
+        const g=gradesMapCache[name]?.[sub.id];
         return `<td class="grade-td">${g!==undefined?`<span class="grade-pill">${esc(String(g))}</span>`:'<span class="grade-empty">—</span>'}</td>`;
       }).join("");
       return `<tr>
         <td class="grade-student-cell">
           <div style="display:flex;align-items:center;gap:8px">
             <div class="avatar avatar-xs">${esc(ini)}</div>
-            <span style="font-size:13px;font-weight:500">${esc(name)}</span>
+            <span class="grade-student-name" style="font-size:13px;font-weight:500">${esc(name)}</span>
           </div>
         </td>
         ${cells}
       </tr>`;
     }).join("");
 
-    c.innerHTML=`<div class="grades-table-wrap">
-      <table class="grades-table">
-        <thead><tr><th class="grade-th grade-name-th">Student</th>${headerCells}</tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
+    c.innerHTML=`
+      <div class="search-bar-wrap">
+        <div class="search-bar">
+          <i class="ti ti-search search-icon"></i>
+          <input type="text" id="grades-search" placeholder="Search student…"
+            oninput="filterGrades()" autocomplete="off" />
+        </div>
+      </div>
+      <div class="grades-table-wrap">
+        <table class="grades-table">
+          <thead><tr><th class="grade-th grade-name-th">Student</th>${headerCells}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div id="grades-no-results" class="empty" hidden>No students match your search.</div>
+      </div>`;
   } catch(e){ c.innerHTML=`<div class="empty">Error: ${esc(e.message)}</div>`; }
 }
 
