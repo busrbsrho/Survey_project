@@ -59,6 +59,19 @@ function setErr(id,msg){ const e=$(id); if(e) e.textContent=msg; }
 function clrErr(id)    { setErr(id,""); }
 function loading(on)   { $("loading-overlay").style.display=on?"flex":"none"; }
 
+function validURL(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch { return false; }
+}
+function fixURL(url) {
+  url = url.trim();
+  if (url && !url.startsWith("http://") && !url.startsWith("https://"))
+    return "https://" + url;
+  return url;
+}
+
 // ── Date helpers ──────────────────────────────────────────────
 const DAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 function formatDate(ds) {
@@ -240,10 +253,12 @@ window.toggleAddWeek = () => {
 window.addWeek = async () => {
   clrErr("new-week-err");
   const wn=$("new-week-name").value.trim(), sn=$("new-survey-name").value.trim(),
-        su=$("new-survey-url").value.trim(), sd=$("new-survey-date").value;
+        sd=$("new-survey-date").value;
+  let su = fixURL($("new-survey-url").value.trim());
   if (!wn) return setErr("new-week-err","Please enter a week name.");
   if (!sn) return setErr("new-week-err","Please enter the survey name.");
   if (!su) return setErr("new-week-err","Please enter the survey URL.");
+  if (!validURL(su)) return setErr("new-week-err","Please enter a valid URL (e.g. https://forms.google.com/...)");
   if (!sd) return setErr("new-week-err","Please pick a date.");
   loading(true);
   try {
@@ -268,9 +283,10 @@ window.toggleQuickAdd = weekId => {
 window.addSurveyToWeek = async weekId => {
   const errId="qs-err-"+weekId; clrErr(errId);
   const sn=$("qs-name-"+weekId)?.value.trim(),
-        su=$("qs-url-" +weekId)?.value.trim(),
         sd=$("qs-date-"+weekId)?.value;
+  let su = fixURL($("qs-url-"+weekId)?.value.trim() || "");
   if (!sn||!su) return setErr(errId,"Please fill in name and URL.");
+  if (!validURL(su)) return setErr(errId,"Please enter a valid URL (e.g. https://forms.google.com/...)");
   if (!sd)      return setErr(errId,"Please pick a date.");
   loading(true);
   try {
@@ -309,9 +325,10 @@ window.startEditSurvey = (weekId,surveyId) => {
 window.cancelEdit = () => { editingEntry=null; renderInstructorWeeks(); };
 window.saveEditSurvey = async (weekId,surveyId) => {
   const n=$("edit-name-"+surveyId)?.value.trim(),
-        u=$("edit-url-" +surveyId)?.value.trim(),
         d=$("edit-date-"+surveyId)?.value;
+  let u = fixURL($("edit-url-"+surveyId)?.value.trim() || "");
   if (!n||!u||!d) return;
+  if (!validURL(u)) { alert("Please enter a valid URL (e.g. https://forms.google.com/...)"); return; }
   loading(true);
   try {
     await updateDoc(doc(db,"weeks",weekId,"surveys",surveyId),{name:n,url:u,date:d});
@@ -549,12 +566,15 @@ async function renderGradesOverview() {
     }).join("");
 
     c.innerHTML=`
-      <div class="search-bar-wrap">
+      <div class="search-export-row">
         <div class="search-bar">
           <i class="ti ti-search search-icon"></i>
           <input type="text" id="grades-search" placeholder="Search student…"
             oninput="filterGrades()" autocomplete="off" />
         </div>
+        <button class="btn btn-outline btn-sm" onclick="exportGrades()" title="Export to Excel">
+          <i class="ti ti-file-spreadsheet"></i> Export
+        </button>
       </div>
       <div class="grades-table-wrap">
         <table class="grades-table">
@@ -656,6 +676,45 @@ window.saveStudentGrade = async (subjectId, value) => {
   try {
     await setDoc(doc(db,"grades",currentUser,"scores",subjectId),{grade:num,at:Date.now()});
   } catch(e){ alert("Error saving grade: "+e.message); }
+};
+
+// ── EXPORT GRADES TO EXCEL ───────────────────────────────────
+window.exportGrades = () => {
+  if (!subjectsCache.length || !studentsCache.length) {
+    alert("No data to export yet."); return;
+  }
+
+  // Build rows: header + one row per student
+  const header = ["Student", ...subjectsCache.map(s => s.name)];
+  const rows = studentsCache.map(name => {
+    const grades = subjectsCache.map(sub => {
+      const g = gradesMapCache[name]?.[sub.id];
+      return g !== undefined ? g : "";
+    });
+    return [name, ...grades];
+  });
+
+  // Convert to worksheet using SheetJS
+  const wsData = [header, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  // Column widths
+  ws["!cols"] = [{ wch: 28 }, ...subjectsCache.map(() => ({ wch: 16 }))];
+
+  // Style header row bold (SheetJS free tier: basic styles via write options)
+  const range = XLSX.utils.decode_range(ws["!ref"]);
+  for (let C = range.s.c; C <= range.e.c; C++) {
+    const cell = ws[XLSX.utils.encode_cell({ r: 0, c: C })];
+    if (cell) cell.s = { font: { bold: true }, fill: { fgColor: { rgb: "D9EAD3" } } };
+  }
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Grades");
+
+  // Generate filename with today's date
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+  XLSX.writeFile(wb, `grades_${dateStr}.xlsx`);
 };
 
 // ── Keyboard shortcuts ────────────────────────────────────────

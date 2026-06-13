@@ -733,6 +733,15 @@ input[type="checkbox"] {
   box-shadow: 0 0 0 3px rgba(29,158,117,0.12);
 }
 
+/* ─── Search + export row ──────────────────────────────────── */
+.search-export-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.search-export-row .search-bar { flex: 1; }
+
 /* ─── Search bar ────────────────────────────────────────────── */
 .search-bar-wrap {
   margin-bottom: 12px;
