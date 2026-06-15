@@ -49,6 +49,7 @@ let assignmentsCache = [];   // [{ id, name, dueDate, dueSort, link, instruction
 let expandedWeeks = {};
 let quickAddWeeks = {};
 let editingEntry  = null;
+const STUDENT_SURVEYS_WEEK_NAME = "Student surveys";
 
 // ── Helpers ───────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -84,11 +85,13 @@ function updateTopbar(role, name) {
   $("topbar-sub").textContent = name;
   $("role-badge").textContent = role;
   $("role-badge").hidden = false;
+  $("signout-btn").hidden = false;
 }
 
 window.signOut = () => {
   clearSession();
   $("role-badge").hidden = true;
+  $("signout-btn").hidden = true;
   $("topbar-sub").textContent = "Sign in to continue";
   ["ins-user","ins-pass","grd-user","grd-pass",
    "slogin-name","slogin-pass","signup-name","signup-pass"]
@@ -297,6 +300,61 @@ window.addSurveyToWeek = async weekId => {
     quickAddWeeks[weekId]=false;
     await refreshAll();
   } catch(e){ setErr(errId,"Error: "+e.message); }
+  loading(false);
+};
+
+// ── STUDENT: publish surveys to everyone ──────────────────────
+async function getOrCreateStudentSurveysWeek() {
+  const existing = weeksCache.find(w => w.name === STUDENT_SURVEYS_WEEK_NAME);
+  if (existing) return existing.id;
+
+  const wRef = await addDoc(collection(db,"weeks"),{
+    name: STUDENT_SURVEYS_WEEK_NAME,
+    order: Date.now(),
+    createdAt: Date.now(),
+    createdBy: currentUser || "student",
+    studentPublished: true
+  });
+  return wRef.id;
+}
+
+window.toggleStudentSurveyForm = () => {
+  const f = $("student-survey-form");
+  f.hidden = !f.hidden;
+  if (!f.hidden) {
+    clrErr("student-survey-err");
+    $("student-survey-name").focus();
+    $("student-survey-date").value = todayISO();
+  }
+};
+
+window.publishStudentSurvey = async () => {
+  clrErr("student-survey-err");
+  const name = $("student-survey-name")?.value.trim();
+  const url = $("student-survey-url")?.value.trim();
+  const date = $("student-survey-date")?.value;
+  if (!name) return setErr("student-survey-err","Please enter the survey name.");
+  if (!url) return setErr("student-survey-err","Please enter the survey link.");
+  if (!date) return setErr("student-survey-err","Please pick a date.");
+
+  loading(true);
+  try {
+    const weekId = await getOrCreateStudentSurveysWeek();
+    await addDoc(collection(db,"weeks",weekId,"surveys"),{
+      name,
+      url,
+      date,
+      createdAt: Date.now(),
+      createdBy: currentUser,
+      studentPublished: true
+    });
+    ["student-survey-name","student-survey-url","student-survey-date"].forEach(id=>{ const e=$(id); if(e) e.value=""; });
+    $("student-survey-form").hidden = true;
+    await refreshAll();
+    switchStudentTab("surveys");
+  } catch(e) {
+    setErr("student-survey-err","Error: "+e.message);
+  }
   loading(false);
 };
 
@@ -767,9 +825,10 @@ async function renderStudentView() {
     const datesHtml=byDate.map(([dateKey,surveys])=>{
       const rows=surveys.map(s=>{
         const checked=comp[s.id]?"checked":"";
+        const publishedBy=s.studentPublished&&s.createdBy?`<span class="survey-publisher">by ${esc(s.createdBy)}</span>`:"";
         return `<div class="check-row">
           <input type="checkbox" id="chk-${esc(s.id)}" ${checked} onchange="toggleComplete('${esc(s.id)}',this.checked)"/>
-          <label class="check-label${checked?" done":""}" for="chk-${esc(s.id)}">${esc(s.name)}</label>
+          <label class="check-label${checked?" done":""}" for="chk-${esc(s.id)}">${esc(s.name)}${publishedBy}</label>
           <a href="${esc(s.url)}" target="_blank" rel="noopener" class="open-link"><i class="ti ti-external-link"></i> Open</a>
         </div>`;
       }).join("");

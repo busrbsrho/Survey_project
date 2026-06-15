@@ -24,6 +24,9 @@
       </div>
       <div class="topbar-right">
         <span class="role-badge" id="role-badge" hidden></span>
+        <button class="btn btn-ghost btn-sm" id="signout-btn" hidden onclick="signOut()" title="Sign out">
+          <i class="ti ti-logout"></i>
+        </button>
       </div>
     </header>
 
@@ -294,6 +297,29 @@
         </div>
         <div class="tab-panel" id="stab-surveys" hidden>
           <div class="content">
+            <button class="btn btn-primary btn-sm" onclick="toggleStudentSurveyForm()">
+              <i class="ti ti-plus"></i> Publish survey
+            </button>
+            <div class="add-week-form card" id="student-survey-form" hidden>
+              <h2 class="card-heading">Publish survey to everyone</h2>
+              <div class="form-group">
+                <label class="form-label" for="student-survey-name">Survey name</label>
+                <input type="text" id="student-survey-name" placeholder="Survey name" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="student-survey-url">Survey link</label>
+                <input type="url" id="student-survey-url" placeholder="https://forms.google.com/..." />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="student-survey-date">Date</label>
+                <input type="date" id="student-survey-date" />
+              </div>
+              <p class="err" id="student-survey-err" role="alert"></p>
+              <div class="btn-row">
+                <button class="btn btn-outline btn-sm" onclick="toggleStudentSurveyForm()">Cancel</button>
+                <button class="btn btn-primary btn-sm" onclick="publishStudentSurvey()">Publish</button>
+              </div>
+            </div>
             <div class="card progress-card" id="student-progress-wrap"></div>
             <div id="student-weeks" class="weeks-list"></div>
           </div>
