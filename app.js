@@ -7,6 +7,7 @@
 //    completions/{name}/done/{survId}  → { done, at }
 //    subjects/{id}                     → { name, createdAt }
 //    grades/{studentName}/scores/{subjectId} → { grade, at }
+//    assignments/{id}                  → { name, dueDate, dueSort, link, instructions, order, importedAt }
 // ─────────────────────────────────────────────────────────────
 
 import { initializeApp }  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -42,6 +43,7 @@ let weeksCache       = [];
 let studentsCache    = [];
 let completionsCache = {};   // { name: Set(surveyId) }
 let subjectsCache    = [];   // [{ id, name }]
+let assignmentsCache = [];   // [{ id, name, dueDate, dueSort, link, instructions }]
 
 // ── UI state ──────────────────────────────────────────────────
 let expandedWeeks = {};
@@ -58,19 +60,6 @@ function esc(s) {
 function setErr(id,msg){ const e=$(id); if(e) e.textContent=msg; }
 function clrErr(id)    { setErr(id,""); }
 function loading(on)   { $("loading-overlay").style.display=on?"flex":"none"; }
-
-function validURL(url) {
-  try {
-    const u = new URL(url);
-    return u.protocol === "https:" || u.protocol === "http:";
-  } catch { return false; }
-}
-function fixURL(url) {
-  url = url.trim();
-  if (url && !url.startsWith("http://") && !url.startsWith("https://"))
-    return "https://" + url;
-  return url;
-}
 
 // ── Date helpers ──────────────────────────────────────────────
 const DAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
@@ -95,13 +84,11 @@ function updateTopbar(role, name) {
   $("topbar-sub").textContent = name;
   $("role-badge").textContent = role;
   $("role-badge").hidden = false;
-  $("signout-btn").hidden = false;
 }
 
 window.signOut = () => {
   clearSession();
   $("role-badge").hidden = true;
-  $("signout-btn").hidden = true;
   $("topbar-sub").textContent = "Sign in to continue";
   ["ins-user","ins-pass","grd-user","grd-pass",
    "slogin-name","slogin-pass","signup-name","signup-pass"]
@@ -126,6 +113,10 @@ async function refreshAll() {
   const subSnap = await getDocs(query(collection(db,"subjects"), orderBy("createdAt","asc")));
   subjectsCache = subSnap.docs.map(d=>({id:d.id,...d.data()}));
 
+  // Assignments
+  const assSnap = await getDocs(query(collection(db,"assignments"), orderBy("order","asc")));
+  assignmentsCache = assSnap.docs.map(d=>({id:d.id,...d.data()}));
+
   // Students + completions (only needed for instructors)
   if (currentRole === "instructor" || currentRole === "grades") {
     const stSnap = await getDocs(collection(db,"students"));
@@ -141,17 +132,18 @@ async function refreshAll() {
 
   // Re-render
   if (currentRole === "instructor") renderInstructorWeeks();
-  if (currentRole === "grades")     renderSubjects();
-  if (currentRole === "student")    renderStudentView();
+  if (currentRole === "grades")     { renderSubjects(); renderGradesAssignments(); }
+  if (currentRole === "student")    { renderStudentAssignments(); renderStudentView(); }
 }
 
 // ── AUTH: Surveys instructor ──────────────────────────────────
-window.instructorLogin = () => {
+window.instructorLogin = async () => {
   clrErr("ins-err");
   if ($("ins-user").value.trim()===INSTRUCTOR_CREDS.user &&
       $("ins-pass").value       ===INSTRUCTOR_CREDS.pass) {
     saveSession("instructor","instructor");
     updateTopbar("Surveys Instructor","Instructor");
+    await refreshAll();
     renderInstructorWeeks();
     showScreen("screen-instructor");
   } else { setErr("ins-err","Incorrect credentials."); }
@@ -185,7 +177,7 @@ window.studentSignup = async () => {
     saveSession(name,"student");
     updateTopbar("Student",name);
     await refreshAll();
-    renderStudentView();
+    renderStudentAssignments();
     showScreen("screen-student");
   } catch(e) { setErr("signup-err","Error: "+e.message); }
   loading(false);
@@ -203,7 +195,7 @@ window.studentLogin = async () => {
     saveSession(name,"student");
     updateTopbar("Student",name);
     await refreshAll();
-    renderStudentView();
+    renderStudentAssignments();
     showScreen("screen-student");
   } catch(e) { setErr("slogin-err","Error: "+e.message); }
   loading(false);
@@ -211,38 +203,52 @@ window.studentLogin = async () => {
 
 // ── INSTRUCTOR TABS ───────────────────────────────────────────
 window.switchTab = tab => {
-  const s = tab==="surveys";
-  $("tab-surveys").hidden  = !s;
-  $("tab-students").hidden =  s;
-  $("tab-btn-surveys").classList.toggle("active",s);
-  $("tab-btn-surveys").setAttribute("aria-selected",String(s));
-  $("tab-btn-students").classList.toggle("active",!s);
-  $("tab-btn-students").setAttribute("aria-selected",String(!s));
-  if (!s) renderStudentsTab();
+  const surveys = tab==="surveys";
+  const students = tab==="students";
+  $("tab-surveys").hidden = !surveys;
+  $("tab-students").hidden = !students;
+  $("tab-btn-surveys").classList.toggle("active",surveys);
+  $("tab-btn-surveys").setAttribute("aria-selected",String(surveys));
+  $("tab-btn-students").classList.toggle("active",students);
+  $("tab-btn-students").setAttribute("aria-selected",String(students));
+  if (students) renderStudentsTab();
 };
 
 // ── GRADES TABS ───────────────────────────────────────────────
 window.switchGradesTab = tab => {
-  const s = tab==="subjects";
-  $("gtab-subjects").hidden  = !s;
-  $("gtab-overview").hidden  =  s;
-  $("gtab-btn-subjects").classList.toggle("active",s);
-  $("gtab-btn-subjects").setAttribute("aria-selected",String(s));
-  $("gtab-btn-overview").classList.toggle("active",!s);
-  $("gtab-btn-overview").setAttribute("aria-selected",String(!s));
-  if (!s) renderGradesOverview();
+  const subjects = tab==="subjects";
+  const overview = tab==="overview";
+  const assignments = tab==="assignments";
+  $("gtab-subjects").hidden = !subjects;
+  $("gtab-overview").hidden = !overview;
+  $("gtab-assignments").hidden = !assignments;
+  $("gtab-btn-subjects").classList.toggle("active",subjects);
+  $("gtab-btn-subjects").setAttribute("aria-selected",String(subjects));
+  $("gtab-btn-overview").classList.toggle("active",overview);
+  $("gtab-btn-overview").setAttribute("aria-selected",String(overview));
+  $("gtab-btn-assignments").classList.toggle("active",assignments);
+  $("gtab-btn-assignments").setAttribute("aria-selected",String(assignments));
+  if (overview) renderGradesOverview();
+  if (assignments) renderGradesAssignments();
 };
 
 // ── STUDENT TABS ──────────────────────────────────────────────
 window.switchStudentTab = tab => {
-  const s = tab==="surveys";
-  $("stab-surveys").hidden = !s;
-  $("stab-grades").hidden  =  s;
-  $("stab-btn-surveys").classList.toggle("active",s);
-  $("stab-btn-surveys").setAttribute("aria-selected",String(s));
-  $("stab-btn-grades").classList.toggle("active",!s);
-  $("stab-btn-grades").setAttribute("aria-selected",String(!s));
-  if (!s) renderStudentGrades();
+  const assignments = tab==="assignments";
+  const surveys = tab==="surveys";
+  const grades = tab==="grades";
+  $("stab-assignments").hidden = !assignments;
+  $("stab-surveys").hidden = !surveys;
+  $("stab-grades").hidden = !grades;
+  $("stab-btn-assignments").classList.toggle("active",assignments);
+  $("stab-btn-assignments").setAttribute("aria-selected",String(assignments));
+  $("stab-btn-surveys").classList.toggle("active",surveys);
+  $("stab-btn-surveys").setAttribute("aria-selected",String(surveys));
+  $("stab-btn-grades").classList.toggle("active",grades);
+  $("stab-btn-grades").setAttribute("aria-selected",String(grades));
+  if (assignments) renderStudentAssignments();
+  if (surveys) renderStudentView();
+  if (grades) renderStudentGrades();
 };
 
 // ── ADD WEEK ──────────────────────────────────────────────────
@@ -253,12 +259,10 @@ window.toggleAddWeek = () => {
 window.addWeek = async () => {
   clrErr("new-week-err");
   const wn=$("new-week-name").value.trim(), sn=$("new-survey-name").value.trim(),
-        sd=$("new-survey-date").value;
-  let su = fixURL($("new-survey-url").value.trim());
+        su=$("new-survey-url").value.trim(), sd=$("new-survey-date").value;
   if (!wn) return setErr("new-week-err","Please enter a week name.");
   if (!sn) return setErr("new-week-err","Please enter the survey name.");
   if (!su) return setErr("new-week-err","Please enter the survey URL.");
-  if (!validURL(su)) return setErr("new-week-err","Please enter a valid URL (e.g. https://forms.google.com/...)");
   if (!sd) return setErr("new-week-err","Please pick a date.");
   loading(true);
   try {
@@ -283,10 +287,9 @@ window.toggleQuickAdd = weekId => {
 window.addSurveyToWeek = async weekId => {
   const errId="qs-err-"+weekId; clrErr(errId);
   const sn=$("qs-name-"+weekId)?.value.trim(),
+        su=$("qs-url-" +weekId)?.value.trim(),
         sd=$("qs-date-"+weekId)?.value;
-  let su = fixURL($("qs-url-"+weekId)?.value.trim() || "");
   if (!sn||!su) return setErr(errId,"Please fill in name and URL.");
-  if (!validURL(su)) return setErr(errId,"Please enter a valid URL (e.g. https://forms.google.com/...)");
   if (!sd)      return setErr(errId,"Please pick a date.");
   loading(true);
   try {
@@ -325,10 +328,9 @@ window.startEditSurvey = (weekId,surveyId) => {
 window.cancelEdit = () => { editingEntry=null; renderInstructorWeeks(); };
 window.saveEditSurvey = async (weekId,surveyId) => {
   const n=$("edit-name-"+surveyId)?.value.trim(),
+        u=$("edit-url-" +surveyId)?.value.trim(),
         d=$("edit-date-"+surveyId)?.value;
-  let u = fixURL($("edit-url-"+surveyId)?.value.trim() || "");
   if (!n||!u||!d) return;
-  if (!validURL(u)) { alert("Please enter a valid URL (e.g. https://forms.google.com/...)"); return; }
   loading(true);
   try {
     await updateDoc(doc(db,"weeks",weekId,"surveys",surveyId),{name:n,url:u,date:d});
@@ -440,6 +442,115 @@ function renderInstructorWeeks() {
 }
 window.toggleWeek = id => { expandedWeeks[id]=expandedWeeks[id]===false?true:false; renderInstructorWeeks(); };
 
+// ── ASSIGNMENTS: Excel import + render ────────────────────────
+function normalizeHeader(value) {
+  return String(value || "").replace(/\s/g,"").replace(/[״"]/g,"").toLowerCase();
+}
+
+function getAssignmentValue(row, headerMap, keys) {
+  for (const key of keys) {
+    const index = headerMap[key];
+    if (index !== undefined) return row[index] ?? "";
+  }
+  return "";
+}
+
+function parseAssignmentDate(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+  if (!match) return { dueDate: text, dueSort: text };
+  const day = match[1].padStart(2,"0");
+  const month = match[2].padStart(2,"0");
+  const year = match[3].length === 2 ? `20${match[3]}` : match[3];
+  return { dueDate: `${day}.${month}.${year.slice(2)}`, dueSort: `${year}-${month}-${day}` };
+}
+
+function assignmentLinkHtml(link) {
+  if (!link) return "";
+  return `<a href="${esc(link)}" target="_blank" rel="noopener" class="open-link assignment-link">
+    <i class="ti ti-external-link"></i> קישור
+  </a>`;
+}
+
+function assignmentCard(a) {
+  return `<div class="assignment-card" dir="rtl">
+    <div class="assignment-main">
+      <div class="assignment-title">${esc(a.name)}</div>
+      ${a.dueDate?`<div class="assignment-due"><i class="ti ti-calendar-event"></i> תג״ב: ${esc(a.dueDate)}</div>`:""}
+      ${a.instructions?`<div class="assignment-instructions">${esc(a.instructions).replace(/\n/g,"<br>")}</div>`:""}
+    </div>
+    ${assignmentLinkHtml(a.link)}
+  </div>`;
+}
+
+function renderAssignmentsList(targetId, emptyText) {
+  const c = $(targetId);
+  if (!assignmentsCache.length) {
+    c.innerHTML = `<div class="empty">${emptyText}</div>`;
+    return;
+  }
+  c.innerHTML = `<div class="assignments-list">${assignmentsCache.map(assignmentCard).join("")}</div>`;
+}
+
+function renderGradesAssignments() {
+  renderAssignmentsList("grades-assignments-list","No assignments uploaded yet.");
+  const summary = $("assignments-upload-summary");
+  if (summary) summary.textContent = assignmentsCache.length ? `${assignmentsCache.length} מטלות באתר` : "";
+}
+
+function renderStudentAssignments() {
+  renderAssignmentsList("student-assignments-list","עדיין אין מטלות להצגה.");
+}
+
+window.importAssignmentsExcel = async () => {
+  const input = $("assignments-file");
+  const file = input?.files?.[0];
+  clrErr("assignments-upload-err");
+  if (!file) return setErr("assignments-upload-err","Please choose an Excel file.");
+  if (!window.XLSX) return setErr("assignments-upload-err","Excel reader is still loading. Try again in a moment.");
+
+  loading(true);
+  try {
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type:"array", cellDates:true });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header:1, defval:"", raw:false });
+    const headerIndex = rows.findIndex(row => row.some(cell => normalizeHeader(cell)==="שם"));
+    if (headerIndex === -1) throw new Error("Could not find a header row with the column 'שם'.");
+
+    const headers = rows[headerIndex].map(normalizeHeader);
+    const headerMap = {};
+    headers.forEach((header,index)=>{ if (header) headerMap[header]=index; });
+
+    const parsed = rows.slice(headerIndex+1).map((row,index)=>{
+      const name = String(getAssignmentValue(row,headerMap,["שם","מטלה","משימה"])).trim();
+      if (!name) return null;
+      const due = parseAssignmentDate(getAssignmentValue(row,headerMap,["תגב","תאריך","תאריךיעד","דדליין"]));
+      return {
+        name,
+        dueDate: due.dueDate,
+        dueSort: due.dueSort,
+        link: String(getAssignmentValue(row,headerMap,["קישורים","קישור","לינק"])).trim(),
+        instructions: String(getAssignmentValue(row,headerMap,["הנחיות","הוראות","פירוט"])).trim(),
+        order: index + 1,
+        importedAt: Date.now()
+      };
+    }).filter(Boolean);
+
+    if (!parsed.length) throw new Error("No assignment rows were found in the file.");
+
+    const existing = await getDocs(collection(db,"assignments"));
+    await Promise.all(existing.docs.map(d=>deleteDoc(d.ref)));
+    await Promise.all(parsed.map(item=>addDoc(collection(db,"assignments"),item)));
+    input.value = "";
+    await refreshAll();
+    renderGradesAssignments();
+  } catch(e) {
+    setErr("assignments-upload-err","Error: "+e.message);
+  }
+  loading(false);
+};
+
 // ── RENDER: instructor students tab ───────────────────────────
 async function renderStudentsTab() {
   const c=$("students-list"); c.innerHTML='<div class="empty">Loading…</div>';
@@ -519,6 +630,51 @@ function renderSubjects() {
 // ── GRADES OVERVIEW (grades instructor) ───────────────────────
 let gradesMapCache = {};
 
+function exportCell(value) {
+  return esc(value === undefined || value === null ? "" : value);
+}
+
+window.exportGradesToExcel = () => {
+  if (!subjectsCache.length || !studentsCache.length) {
+    alert("There are no grades to export yet.");
+    return;
+  }
+
+  const headerCells = subjectsCache.map(sub => `<th>${exportCell(sub.name)}</th>`).join("");
+  const rows = studentsCache.map(name => {
+    const cells = subjectsCache.map(sub => `<td>${exportCell(gradesMapCache[name]?.[sub.id])}</td>`).join("");
+    return `<tr><td>${exportCell(name)}</td>${cells}</tr>`;
+  }).join("");
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid #999; padding: 6px 10px; text-align: center; }
+    th:first-child, td:first-child { text-align: left; }
+  </style>
+</head>
+<body>
+  <table>
+    <thead><tr><th>Student</th>${headerCells}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `grades-table-${todayISO()}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
 window.filterGrades = () => {
   const q = ($("grades-search")?.value || "").trim().toLowerCase();
   const rows = document.querySelectorAll(".grades-table tbody tr");
@@ -566,14 +722,16 @@ async function renderGradesOverview() {
     }).join("");
 
     c.innerHTML=`
-      <div class="search-export-row">
-        <div class="search-bar">
-          <i class="ti ti-search search-icon"></i>
-          <input type="text" id="grades-search" placeholder="Search student…"
-            oninput="filterGrades()" autocomplete="off" />
+      <div class="grades-toolbar">
+        <div class="search-bar-wrap">
+          <div class="search-bar">
+            <i class="ti ti-search search-icon"></i>
+            <input type="text" id="grades-search" placeholder="Search student…"
+              oninput="filterGrades()" autocomplete="off" />
+          </div>
         </div>
-        <button class="btn btn-outline btn-sm" onclick="exportGrades()" title="Export to Excel">
-          <i class="ti ti-file-spreadsheet"></i> Export
+        <button class="btn btn-primary btn-sm" onclick="exportGradesToExcel()">
+          <i class="ti ti-file-spreadsheet"></i> Export Excel
         </button>
       </div>
       <div class="grades-table-wrap">
@@ -678,45 +836,6 @@ window.saveStudentGrade = async (subjectId, value) => {
   } catch(e){ alert("Error saving grade: "+e.message); }
 };
 
-// ── EXPORT GRADES TO EXCEL ───────────────────────────────────
-window.exportGrades = () => {
-  if (!subjectsCache.length || !studentsCache.length) {
-    alert("No data to export yet."); return;
-  }
-
-  // Build rows: header + one row per student
-  const header = ["Student", ...subjectsCache.map(s => s.name)];
-  const rows = studentsCache.map(name => {
-    const grades = subjectsCache.map(sub => {
-      const g = gradesMapCache[name]?.[sub.id];
-      return g !== undefined ? g : "";
-    });
-    return [name, ...grades];
-  });
-
-  // Convert to worksheet using SheetJS
-  const wsData = [header, ...rows];
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-  // Column widths
-  ws["!cols"] = [{ wch: 28 }, ...subjectsCache.map(() => ({ wch: 16 }))];
-
-  // Style header row bold (SheetJS free tier: basic styles via write options)
-  const range = XLSX.utils.decode_range(ws["!ref"]);
-  for (let C = range.s.c; C <= range.e.c; C++) {
-    const cell = ws[XLSX.utils.encode_cell({ r: 0, c: C })];
-    if (cell) cell.s = { font: { bold: true }, fill: { fgColor: { rgb: "D9EAD3" } } };
-  }
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Grades");
-
-  // Generate filename with today's date
-  const today = new Date();
-  const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
-  XLSX.writeFile(wb, `grades_${dateStr}.xlsx`);
-};
-
 // ── Keyboard shortcuts ────────────────────────────────────────
 document.addEventListener("keydown", e=>{
   if (e.key!=="Enter") return;
@@ -742,7 +861,7 @@ setInterval(()=>refreshAll(), 20000);
     renderSubjects(); showScreen("screen-grades");
   } else if (currentRole==="student"&&currentUser){
     updateTopbar("Student",currentUser);
-    renderStudentView(); showScreen("screen-student");
+    renderStudentAssignments(); showScreen("screen-student");
   }
   loading(false);
 })();
