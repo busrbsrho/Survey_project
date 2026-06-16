@@ -24,18 +24,18 @@ const app = initializeApp(firebaseConfig);
 const db  = getFirestore(app);
 
 // ── Session ──────────────────────────────────────────────────
-let currentUser = sessionStorage.getItem("st_user") || null;
-let currentRole = sessionStorage.getItem("st_role") || null;
+let currentUser = localStorage.getItem("st_user") || null;
+let currentRole = localStorage.getItem("st_role") || null;
 
 function saveSession(user, role) {
   currentUser = user; currentRole = role;
-  sessionStorage.setItem("st_user", user);
-  sessionStorage.setItem("st_role", role);
+  localStorage.setItem("st_user", user);
+  localStorage.setItem("st_role", role);
 }
 function clearSession() {
   currentUser = null; currentRole = null;
-  sessionStorage.removeItem("st_user");
-  sessionStorage.removeItem("st_role");
+  localStorage.removeItem("st_user");
+  localStorage.removeItem("st_role");
 }
 
 // ── Cache ─────────────────────────────────────────────────────
@@ -120,8 +120,8 @@ async function refreshAll() {
   const assSnap = await getDocs(query(collection(db,"assignments"), orderBy("order","asc")));
   assignmentsCache = assSnap.docs.map(d=>({id:d.id,...d.data()}));
 
-  // Students + completions (only needed for instructors)
-  if (currentRole === "instructor" || currentRole === "grades") {
+  // Students + completions
+  if (currentRole === "instructor" || currentRole === "grades" || currentRole === "student") {
     const stSnap = await getDocs(collection(db,"students"));
     studentsCache = stSnap.docs.map(d=>d.id);
     completionsCache = {};
@@ -826,10 +826,29 @@ async function renderStudentView() {
       const rows=surveys.map(s=>{
         const checked=comp[s.id]?"checked":"";
         const publishedBy=s.studentPublished&&s.createdBy?`<span class="survey-publisher">by ${esc(s.createdBy)}</span>`:"";
-        return `<div class="check-row">
-          <input type="checkbox" id="chk-${esc(s.id)}" ${checked} onchange="toggleComplete('${esc(s.id)}',this.checked)"/>
-          <label class="check-label${checked?" done":""}" for="chk-${esc(s.id)}">${esc(s.name)}${publishedBy}</label>
-          <a href="${esc(s.url)}" target="_blank" rel="noopener" class="open-link"><i class="ti ti-external-link"></i> Open</a>
+        const canSeePending=s.studentPublished&&s.createdBy===currentUser;
+        const pending=canSeePending?studentsCache.filter(n=>!completionsCache[n]?.has(s.id)):[];
+        const pendingHtml=pending.length
+          ? pending.map(name=>{
+              const ini=name.split(" ").map(x=>x[0]).join("").toUpperCase().slice(0,2);
+              return `<div class="pending-student"><div class="avatar avatar-xs">${esc(ini)}</div>${esc(name)}</div>`;
+            }).join("")
+          : `<div class="pending-all-done"><i class="ti ti-circle-check"></i> All students answered</div>`;
+        return `<div class="student-survey-wrap">
+          <div class="check-row">
+            <input type="checkbox" id="chk-${esc(s.id)}" ${checked} onchange="toggleComplete('${esc(s.id)}',this.checked)"/>
+            <label class="check-label${checked?" done":""}" for="chk-${esc(s.id)}">${esc(s.name)}${publishedBy}</label>
+            <a href="${esc(s.url)}" target="_blank" rel="noopener" class="open-link"><i class="ti ti-external-link"></i> Open</a>
+            ${canSeePending?`<button class="btn btn-ghost btn-sm pending-toggle${pending.length===0?" pending-done":""}"
+              onclick="toggleStudentPending('${esc(s.id)}')" title="Who hasn't answered">
+              <i class="ti ti-users"></i>
+              <span class="pending-badge">${pending.length}</span>
+            </button>`:""}
+          </div>
+          ${canSeePending?`<div class="pending-panel" id="student-pending-${esc(s.id)}" hidden>
+            <div class="pending-label">Not answered yet (${pending.length} / ${studentsCache.length})</div>
+            <div class="pending-list">${pendingHtml}</div>
+          </div>`:""}
         </div>`;
       }).join("");
       return `<div class="date-group">
@@ -859,6 +878,11 @@ window.toggleComplete = async (surveyId,checked)=>{
 };
 
 // ── STUDENT: render grades tab ────────────────────────────────
+window.toggleStudentPending = id => {
+  const p = $("student-pending-"+id);
+  if (p) p.hidden = !p.hidden;
+};
+
 async function renderStudentGrades() {
   const c=$("student-grades-list");
   if (!subjectsCache.length){ c.innerHTML='<div class="empty">No subjects have been added yet.</div>'; return; }
@@ -905,8 +929,12 @@ document.addEventListener("keydown", e=>{
   else if (id==="screen-student-signup") studentSignup();
 });
 
-// ── Auto-refresh every 20s ────────────────────────────────────
-setInterval(()=>refreshAll(), 20000);
+// ── Auto-refresh ──────────────────────────────────────────────
+setInterval(()=>refreshAll(), 5000);
+window.addEventListener("focus", () => refreshAll());
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshAll();
+});
 
 // ── Boot ──────────────────────────────────────────────────────
 (async()=>{
