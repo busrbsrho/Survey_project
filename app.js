@@ -16,7 +16,8 @@ import { getFirestore,
          getDocs, getDoc,
          setDoc, addDoc,
          updateDoc, deleteDoc,
-         query, orderBy }  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+         query, orderBy,
+         onSnapshot }  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, INSTRUCTOR_CREDS, GRADES_CREDS } from "./firebase-config.js";
 
 // ── Firebase ─────────────────────────────────────────────────
@@ -49,7 +50,11 @@ let assignmentsCache = [];   // [{ id, name, dueDate, dueSort, link, instruction
 let expandedWeeks = {};
 let quickAddWeeks = {};
 let editingEntry  = null;
+let openStudentPending = {};
 const STUDENT_SURVEYS_WEEK_NAME = "Student surveys";
+let realtimeUnsubs = [];
+let realtimeTimer = null;
+let realtimeReady = false;
 
 // ── Helpers ───────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -61,6 +66,57 @@ function esc(s) {
 function setErr(id,msg){ const e=$(id); if(e) e.textContent=msg; }
 function clrErr(id)    { setErr(id,""); }
 function loading(on)   { $("loading-overlay").style.display=on?"flex":"none"; }
+
+function stopRealtimeRefresh() {
+  realtimeUnsubs.forEach(unsub => {
+    try { unsub(); } catch {}
+  });
+  realtimeUnsubs = [];
+  realtimeReady = false;
+  if (realtimeTimer) clearTimeout(realtimeTimer);
+  realtimeTimer = null;
+}
+
+function scheduleRealtimeRefresh() {
+  if (!realtimeReady || !currentRole) return;
+  if (realtimeTimer) clearTimeout(realtimeTimer);
+  realtimeTimer = setTimeout(async () => {
+    await refreshAll();
+    startRealtimeRefresh();
+  }, 350);
+}
+
+function watchQuery(ref) {
+  let initialized = false;
+  const unsub = onSnapshot(ref, () => {
+    if (!initialized) { initialized = true; return; }
+    scheduleRealtimeRefresh();
+  }, () => {});
+  realtimeUnsubs.push(unsub);
+}
+
+function startRealtimeRefresh() {
+  stopRealtimeRefresh();
+  if (!currentRole) return;
+
+  watchQuery(collection(db,"weeks"));
+  watchQuery(collection(db,"subjects"));
+  watchQuery(collection(db,"assignments"));
+
+  weeksCache.forEach(week => {
+    watchQuery(collection(db,"weeks",week.id,"surveys"));
+  });
+
+  if (currentRole === "instructor" || currentRole === "grades" || currentRole === "student") {
+    watchQuery(collection(db,"students"));
+    studentsCache.forEach(name => {
+      watchQuery(collection(db,"completions",name,"done"));
+      watchQuery(collection(db,"grades",name,"scores"));
+    });
+  }
+
+  realtimeReady = true;
+}
 
 // ── Date helpers ──────────────────────────────────────────────
 const DAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
@@ -89,7 +145,9 @@ function updateTopbar(role, name) {
 }
 
 window.signOut = () => {
+  stopRealtimeRefresh();
   clearSession();
+  openStudentPending = {};
   $("role-badge").hidden = true;
   $("signout-btn").hidden = true;
   $("topbar-sub").textContent = "Sign in to continue";
@@ -147,6 +205,7 @@ window.instructorLogin = async () => {
     saveSession("instructor","instructor");
     updateTopbar("Surveys Instructor","Instructor");
     await refreshAll();
+    startRealtimeRefresh();
     renderInstructorWeeks();
     showScreen("screen-instructor");
   } else { setErr("ins-err","Incorrect credentials."); }
@@ -160,6 +219,7 @@ window.gradesLogin = async () => {
     saveSession("grades","grades");
     updateTopbar("Grades Instructor","Grades Instructor");
     await refreshAll();
+    startRealtimeRefresh();
     renderSubjects();
     showScreen("screen-grades");
   } else { setErr("grd-err","Incorrect credentials."); }
@@ -180,6 +240,7 @@ window.studentSignup = async () => {
     saveSession(name,"student");
     updateTopbar("Student",name);
     await refreshAll();
+    startRealtimeRefresh();
     renderStudentAssignments();
     showScreen("screen-student");
   } catch(e) { setErr("signup-err","Error: "+e.message); }
@@ -198,6 +259,7 @@ window.studentLogin = async () => {
     saveSession(name,"student");
     updateTopbar("Student",name);
     await refreshAll();
+    startRealtimeRefresh();
     renderStudentAssignments();
     showScreen("screen-student");
   } catch(e) { setErr("slogin-err","Error: "+e.message); }
@@ -828,6 +890,7 @@ async function renderStudentView() {
         const publishedBy=s.studentPublished&&s.createdBy?`<span class="survey-publisher">by ${esc(s.createdBy)}</span>`:"";
         const canSeePending=s.studentPublished&&s.createdBy===currentUser;
         const pending=canSeePending?studentsCache.filter(n=>!completionsCache[n]?.has(s.id)):[];
+        const pendingOpen=openStudentPending[s.id]===true;
         const pendingHtml=pending.length
           ? pending.map(name=>{
               const ini=name.split(" ").map(x=>x[0]).join("").toUpperCase().slice(0,2);
@@ -845,7 +908,7 @@ async function renderStudentView() {
               <span class="pending-badge">${pending.length}</span>
             </button>`:""}
           </div>
-          ${canSeePending?`<div class="pending-panel" id="student-pending-${esc(s.id)}" hidden>
+          ${canSeePending?`<div class="pending-panel" id="student-pending-${esc(s.id)}" ${pendingOpen?"":"hidden"}>
             <div class="pending-label">Not answered yet (${pending.length} / ${studentsCache.length})</div>
             <div class="pending-list">${pendingHtml}</div>
           </div>`:""}
@@ -879,8 +942,9 @@ window.toggleComplete = async (surveyId,checked)=>{
 
 // ── STUDENT: render grades tab ────────────────────────────────
 window.toggleStudentPending = id => {
+  openStudentPending[id] = !openStudentPending[id];
   const p = $("student-pending-"+id);
-  if (p) p.hidden = !p.hidden;
+  if (p) p.hidden = !openStudentPending[id];
 };
 
 async function renderStudentGrades() {
@@ -929,12 +993,7 @@ document.addEventListener("keydown", e=>{
   else if (id==="screen-student-signup") studentSignup();
 });
 
-// ── Auto-refresh ──────────────────────────────────────────────
-setInterval(()=>refreshAll(), 5000);
-window.addEventListener("focus", () => refreshAll());
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) refreshAll();
-});
+// ── Realtime refresh ──────────────────────────────────────────
 
 // ── Boot ──────────────────────────────────────────────────────
 (async()=>{
@@ -942,12 +1001,15 @@ document.addEventListener("visibilitychange", () => {
   await refreshAll();
   if (currentRole==="instructor"){
     updateTopbar("Surveys Instructor","Instructor");
+    startRealtimeRefresh();
     renderInstructorWeeks(); showScreen("screen-instructor");
   } else if (currentRole==="grades"){
     updateTopbar("Grades Instructor","Grades Instructor");
+    startRealtimeRefresh();
     renderSubjects(); showScreen("screen-grades");
   } else if (currentRole==="student"&&currentUser){
     updateTopbar("Student",currentUser);
+    startRealtimeRefresh();
     renderStudentAssignments(); showScreen("screen-student");
   }
   loading(false);
