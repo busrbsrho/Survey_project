@@ -16,8 +16,7 @@ import { getFirestore,
          getDocs, getDoc,
          setDoc, addDoc,
          updateDoc, deleteDoc,
-         query, orderBy,
-         onSnapshot }  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+         query, orderBy }  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, INSTRUCTOR_CREDS, GRADES_CREDS } from "./firebase-config.js";
 
 // ── Firebase ─────────────────────────────────────────────────
@@ -32,6 +31,7 @@ function saveSession(user, role) {
   currentUser = user; currentRole = role;
   localStorage.setItem("st_user", user);
   localStorage.setItem("st_role", role);
+  openStudentPending = loadOpenStudentPending();
 }
 function clearSession() {
   currentUser = null; currentRole = null;
@@ -50,11 +50,8 @@ let assignmentsCache = [];   // [{ id, name, dueDate, dueSort, link, instruction
 let expandedWeeks = {};
 let quickAddWeeks = {};
 let editingEntry  = null;
-let openStudentPending = {};
+let openStudentPending = loadOpenStudentPending();
 const STUDENT_SURVEYS_WEEK_NAME = "Student surveys";
-let realtimeUnsubs = [];
-let realtimeTimer = null;
-let realtimeReady = false;
 
 // ── Helpers ───────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -66,56 +63,22 @@ function esc(s) {
 function setErr(id,msg){ const e=$(id); if(e) e.textContent=msg; }
 function clrErr(id)    { setErr(id,""); }
 function loading(on)   { $("loading-overlay").style.display=on?"flex":"none"; }
+function savedReloadNotice() { alert("Saved. Reload the page to see the latest shared data."); }
 
-function stopRealtimeRefresh() {
-  realtimeUnsubs.forEach(unsub => {
-    try { unsub(); } catch {}
-  });
-  realtimeUnsubs = [];
-  realtimeReady = false;
-  if (realtimeTimer) clearTimeout(realtimeTimer);
-  realtimeTimer = null;
+function openPendingStorageKey() {
+  return `st_open_pending_${currentUser || "guest"}`;
 }
 
-function scheduleRealtimeRefresh() {
-  if (!realtimeReady || !currentRole) return;
-  if (realtimeTimer) clearTimeout(realtimeTimer);
-  realtimeTimer = setTimeout(async () => {
-    await refreshAll();
-    startRealtimeRefresh();
-  }, 350);
-}
-
-function watchQuery(ref) {
-  let initialized = false;
-  const unsub = onSnapshot(ref, () => {
-    if (!initialized) { initialized = true; return; }
-    scheduleRealtimeRefresh();
-  }, () => {});
-  realtimeUnsubs.push(unsub);
-}
-
-function startRealtimeRefresh() {
-  stopRealtimeRefresh();
-  if (!currentRole) return;
-
-  watchQuery(collection(db,"weeks"));
-  watchQuery(collection(db,"subjects"));
-  watchQuery(collection(db,"assignments"));
-
-  weeksCache.forEach(week => {
-    watchQuery(collection(db,"weeks",week.id,"surveys"));
-  });
-
-  if (currentRole === "instructor" || currentRole === "grades" || currentRole === "student") {
-    watchQuery(collection(db,"students"));
-    studentsCache.forEach(name => {
-      watchQuery(collection(db,"completions",name,"done"));
-      watchQuery(collection(db,"grades",name,"scores"));
-    });
+function loadOpenStudentPending() {
+  try {
+    return JSON.parse(localStorage.getItem(openPendingStorageKey()) || "{}");
+  } catch {
+    return {};
   }
+}
 
-  realtimeReady = true;
+function saveOpenStudentPending() {
+  localStorage.setItem(openPendingStorageKey(), JSON.stringify(openStudentPending));
 }
 
 // ── Date helpers ──────────────────────────────────────────────
@@ -145,7 +108,7 @@ function updateTopbar(role, name) {
 }
 
 window.signOut = () => {
-  stopRealtimeRefresh();
+  localStorage.removeItem(openPendingStorageKey());
   clearSession();
   openStudentPending = {};
   $("role-badge").hidden = true;
@@ -205,7 +168,6 @@ window.instructorLogin = async () => {
     saveSession("instructor","instructor");
     updateTopbar("Surveys Instructor","Instructor");
     await refreshAll();
-    startRealtimeRefresh();
     renderInstructorWeeks();
     showScreen("screen-instructor");
   } else { setErr("ins-err","Incorrect credentials."); }
@@ -219,7 +181,6 @@ window.gradesLogin = async () => {
     saveSession("grades","grades");
     updateTopbar("Grades Instructor","Grades Instructor");
     await refreshAll();
-    startRealtimeRefresh();
     renderSubjects();
     showScreen("screen-grades");
   } else { setErr("grd-err","Incorrect credentials."); }
@@ -240,7 +201,6 @@ window.studentSignup = async () => {
     saveSession(name,"student");
     updateTopbar("Student",name);
     await refreshAll();
-    startRealtimeRefresh();
     renderStudentAssignments();
     showScreen("screen-student");
   } catch(e) { setErr("signup-err","Error: "+e.message); }
@@ -259,7 +219,6 @@ window.studentLogin = async () => {
     saveSession(name,"student");
     updateTopbar("Student",name);
     await refreshAll();
-    startRealtimeRefresh();
     renderStudentAssignments();
     showScreen("screen-student");
   } catch(e) { setErr("slogin-err","Error: "+e.message); }
@@ -335,7 +294,7 @@ window.addWeek = async () => {
     await addDoc(collection(db,"weeks",wRef.id,"surveys"),{name:sn,url:su,date:sd,createdAt:Date.now()});
     ["new-week-name","new-survey-name","new-survey-url","new-survey-date"].forEach(id=>{$(id).value="";});
     $("add-week-form").hidden=true;
-    await refreshAll();
+    savedReloadNotice();
   } catch(e){ setErr("new-week-err","Error: "+e.message); }
   loading(false);
 };
@@ -360,7 +319,7 @@ window.addSurveyToWeek = async weekId => {
   try {
     await addDoc(collection(db,"weeks",weekId,"surveys"),{name:sn,url:su,date:sd,createdAt:Date.now()});
     quickAddWeeks[weekId]=false;
-    await refreshAll();
+    savedReloadNotice();
   } catch(e){ setErr(errId,"Error: "+e.message); }
   loading(false);
 };
@@ -412,8 +371,7 @@ window.publishStudentSurvey = async () => {
     });
     ["student-survey-name","student-survey-url","student-survey-date"].forEach(id=>{ const e=$(id); if(e) e.value=""; });
     $("student-survey-form").hidden = true;
-    await refreshAll();
-    switchStudentTab("surveys");
+    savedReloadNotice();
   } catch(e) {
     setErr("student-survey-err","Error: "+e.message);
   }
@@ -429,13 +387,13 @@ window.deleteWeek = async (weekId,weekName) => {
     for (const s of ss.docs) await deleteDoc(s.ref);
     await deleteDoc(doc(db,"weeks",weekId));
     delete expandedWeeks[weekId]; delete quickAddWeeks[weekId];
-    await refreshAll();
+    savedReloadNotice();
   } catch(e){ alert("Error: "+e.message); }
   loading(false);
 };
 window.deleteSurvey = async (weekId,surveyId) => {
   loading(true);
-  try { await deleteDoc(doc(db,"weeks",weekId,"surveys",surveyId)); await refreshAll(); }
+  try { await deleteDoc(doc(db,"weeks",weekId,"surveys",surveyId)); savedReloadNotice(); }
   catch(e){ alert("Error: "+e.message); }
   loading(false);
 };
@@ -454,7 +412,7 @@ window.saveEditSurvey = async (weekId,surveyId) => {
   loading(true);
   try {
     await updateDoc(doc(db,"weeks",weekId,"surveys",surveyId),{name:n,url:u,date:d});
-    editingEntry=null; await refreshAll();
+    editingEntry=null; savedReloadNotice();
   } catch(e){ alert("Error: "+e.message); }
   loading(false);
 };
@@ -663,8 +621,7 @@ window.importAssignmentsExcel = async () => {
     await Promise.all(existing.docs.map(d=>deleteDoc(d.ref)));
     await Promise.all(parsed.map(item=>addDoc(collection(db,"assignments"),item)));
     input.value = "";
-    await refreshAll();
-    renderGradesAssignments();
+    savedReloadNotice();
   } catch(e) {
     setErr("assignments-upload-err","Error: "+e.message);
   }
@@ -712,7 +669,7 @@ window.addSubject = async () => {
     await addDoc(collection(db,"subjects"),{name,createdAt:Date.now()});
     $("new-subject-name").value="";
     $("add-subject-form").hidden=true;
-    await refreshAll();
+    savedReloadNotice();
   } catch(e){ setErr("new-subject-err","Error: "+e.message); }
   loading(false);
 };
@@ -725,7 +682,7 @@ window.deleteSubject = async (id,name) => {
       try { await deleteDoc(doc(db,"grades",sName,"scores",id)); } catch{}
     }));
     await deleteDoc(doc(db,"subjects",id));
-    await refreshAll();
+    savedReloadNotice();
   } catch(e){ alert("Error: "+e.message); }
   loading(false);
 };
@@ -943,6 +900,7 @@ window.toggleComplete = async (surveyId,checked)=>{
 // ── STUDENT: render grades tab ────────────────────────────────
 window.toggleStudentPending = id => {
   openStudentPending[id] = !openStudentPending[id];
+  saveOpenStudentPending();
   const p = $("student-pending-"+id);
   if (p) p.hidden = !openStudentPending[id];
 };
@@ -993,7 +951,7 @@ document.addEventListener("keydown", e=>{
   else if (id==="screen-student-signup") studentSignup();
 });
 
-// ── Realtime refresh ──────────────────────────────────────────
+// Data refreshes on page load/login. Shared changes appear after reload.
 
 // ── Boot ──────────────────────────────────────────────────────
 (async()=>{
@@ -1001,15 +959,12 @@ document.addEventListener("keydown", e=>{
   await refreshAll();
   if (currentRole==="instructor"){
     updateTopbar("Surveys Instructor","Instructor");
-    startRealtimeRefresh();
     renderInstructorWeeks(); showScreen("screen-instructor");
   } else if (currentRole==="grades"){
     updateTopbar("Grades Instructor","Grades Instructor");
-    startRealtimeRefresh();
     renderSubjects(); showScreen("screen-grades");
   } else if (currentRole==="student"&&currentUser){
     updateTopbar("Student",currentUser);
-    startRealtimeRefresh();
     renderStudentAssignments(); showScreen("screen-student");
   }
   loading(false);
